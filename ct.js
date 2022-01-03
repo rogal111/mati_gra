@@ -3452,14 +3452,7 @@ ct.rooms.beforeDraw = function beforeDraw() {
     
 };
 ct.rooms.afterDraw = function afterDraw() {
-    ct.mouse.xprev = ct.mouse.x;
-ct.mouse.yprev = ct.mouse.y;
-ct.mouse.xuiprev = ct.mouse.xui;
-ct.mouse.yuiprev = ct.mouse.yui;
-ct.mouse.pressed = ct.mouse.released = false;
-ct.inputs.registry['mouse.Wheel'] = 0;
-ct.keyboard.clear();
-if (ct.sound.follow && !ct.sound.follow.kill) {
+    if (ct.sound.follow && !ct.sound.follow.kill) {
     ct.sound.howler.pos(
         ct.sound.follow.x,
         ct.sound.follow.y,
@@ -3468,6 +3461,13 @@ if (ct.sound.follow && !ct.sound.follow.kill) {
 } else if (ct.sound.manageListenerPosition) {
     ct.sound.howler.pos(ct.camera.x, ct.camera.y, ct.camera.z || 0);
 }
+ct.keyboard.clear();
+ct.mouse.xprev = ct.mouse.x;
+ct.mouse.yprev = ct.mouse.y;
+ct.mouse.xuiprev = ct.mouse.xui;
+ct.mouse.yuiprev = ct.mouse.yui;
+ct.mouse.pressed = ct.mouse.released = false;
+ct.inputs.registry['mouse.Wheel'] = 0;
 
 };
 
@@ -3851,7 +3851,7 @@ ct.rooms.templates['poziom13'] = {
         
     },
     onCreate() {
-        this.waterLevel = true;
+        this.underwaterLevel = true;
 this.nextRoom = 'poziom1';
 inGameRoomStart(this);
 
@@ -4462,13 +4462,13 @@ ct.types.templates["robot"] = {
         this.movespeed = 4 * ct.delta; // Max horizontal speed
 
 if(!this.first_setup) {
-this.jumpSpeed = ct.room.waterLevel ? -3 : -10;
-this.gravity = ct.room.waterLevel ? 0.05 : 0.4;
-if (this.tex !== 'Robot_Walking' && ct.room.waterLevel) {
+this.jumpSpeed = ct.room.underwaterLevel ? -3 : -10;
+this.gravity = ct.room.underwaterLevel ? 0.05 : 0.4;
+if (this.tex !== 'Robot_Walking' && ct.room.underwaterLevel) {
     this.tex = 'Robot_Walking';
     this.play();
 }
-if(ct.room.waterLevel) {
+if(ct.room.underwaterLevel) {
         this.rotation = -90;
     }
 }
@@ -4478,31 +4478,31 @@ if(ct.room.waterLevel) {
 if (ct.actions.MoveLeft.down) {
     // If the A key or left arrow on a keyboard is down, then move to left
     this.hspeed = -this.movespeed;
-    if (this.tex !== 'Robot_Walking' && !ct.room.waterLevel) {
+    if (this.tex !== 'Robot_Walking' && !ct.room.underwaterLevel) {
         this.tex = 'Robot_Walking';
         this.play();
     }
     this.scale.x = -1;
-    if(ct.room.waterLevel) {
+    if(ct.room.underwaterLevel) {
         this.rotation = 90;
     }
 } else if (ct.actions.MoveRight.down) {
     // If the D key or right arrow on a keyboard is down, then move to right
     this.hspeed = this.movespeed;
     // Set the walking animation and transform the robot to the right
-    if (this.tex !== 'Robot_Walking' && !ct.room.waterLevel) {
+    if (this.tex !== 'Robot_Walking' && !ct.room.underwaterLevel) {
         this.tex = 'Robot_Walking';
         this.play();
     }
     
     this.scale.x = 1;
-    if(ct.room.waterLevel) {
+    if(ct.room.underwaterLevel) {
         this.rotation = -90;
     }
 } else {
     // Don't move horizontally if no input
     this.hspeed = 0;
-    if(!ct.room.waterLevel) {
+    if(!ct.room.underwaterLevel) {
         this.tex = 'Robot_Idle';
     }
 }
@@ -4510,7 +4510,7 @@ if (ct.actions.MoveLeft.down) {
 var skrzynia;
 
 // If there is ground underneath the Robot…
-if ((ct.room.waterLevel && ct.actions.Jump.down) || ct.place.occupied(this, this.x, this.y + 1, 'Solid')) {
+if ((ct.room.underwaterLevel && ct.actions.Jump.down) || ct.place.occupied(this, this.x, this.y + 1, 'Solid')) {
     // …and the W key or the spacebar is down…
     if (ct.actions.Jump.down) {
         // …then jump!
@@ -4524,12 +4524,12 @@ if ((ct.room.waterLevel && ct.actions.Jump.down) || ct.place.occupied(this, this
     this.vspeed += this.gravity * ct.delta;
 
     // Set jumping animation!
-    if(!ct.room.waterLevel) {
+    if(!ct.room.underwaterLevel) {
         this.tex = 'Robot_Jump';
     }
 }
 
-if(ct.room.waterLevel){
+if(ct.room.underwaterLevel){
   if (skrzynia = ct.place.occupied(this, this.x, this.y + 1, 'skrzynia')) {
         skrzynia.kill = true
     }
@@ -4545,7 +4545,7 @@ if (skrzynia = ct.place.occupied(this, this.x - 1, this.y , 'skrzynia')) {
 } else {
     if (skrzynia = ct.place.occupied(this, this.x, this.y + 1, 'skrzynia')) {
         this.vspeed = this.jumpSpeed;
-        if(!ct.room.waterLevel) {
+        if(!ct.room.underwaterLevel) {
             this.tex = 'Robot_Jump';
         }
         skrzynia.kill = true
@@ -4593,8 +4593,8 @@ if (ct.place.occupied(this, this.x, this.y, 'Deadly')) {
         
     },
     onCreate: function () {
-        this.jumpSpeed = ct.room.waterLevel ? -3 : -10;
-this.gravity = ct.room.waterLevel ? 0.05 : 0.4;
+        this.jumpSpeed = ct.room.underwaterLevel ? -3 : -10;
+this.gravity = ct.room.underwaterLevel ? 0.05 : 0.4;
 this.animationSpeed = 0.2;
 this.hspeed = 0; // Horizontal speed
 this.vspeed = 0; // Vertical speed
