@@ -737,7 +737,7 @@ ct.inputs = {
 
 ct.inputs.addAction('MoveRight', [{"code":"keyboard.KeyD"},{"code":"keyboard.ArrowRight"}]);
 ct.inputs.addAction('MoveLeft', [{"code":"keyboard.ArrowLeft"}]);
-ct.inputs.addAction('Jump', [{"code":"keyboard.ArrowUp"}]);
+ct.inputs.addAction('Jump', [{"code":"keyboard.ArrowUp"},{"code":"keyboard.Space"}]);
 
 
 /**
@@ -2954,8 +2954,138 @@ ct.inputs.addAction('Jump', [{"code":"keyboard.ArrowUp"}]);
         return document.fullscreen || document.webkitIsFullScreen || document.mozFullScreen;
     };
 })(ct);
+
+/* Based on https://github.com/luser/gamepadtest */
+
+(function() {
+  const standardMapping = {
+    controllers: {},
+    buttonsMapping: [
+      'Button1',
+      'Button2',
+      'Button3',
+      'Button4',
+      'L1',
+      'R1',
+      'L2',
+      'R2',
+      'Select',
+      'Start',
+      // here, must have same name as in module.js
+      'L3',
+      //'LStickButton',
+      // here, too...
+      'R3',
+      //'RStickButton',
+      // up, down, left and right are all mapped as axes.
+      'Up',
+      'Down',
+      'Left',
+      'Right'
+
+      // + a special button code `Any`, that requires special handling
+    ],
+    axesMapping: ['LStickX', 'LStickY', 'RStickX', 'RStickY']
+  };
+
+  const prefix = 'gamepad.';
+
+  const setRegistry = function(key, value) {
+    ct.inputs.registry[prefix + key] = value;
+  };
+  const getRegistry = function(key) {
+    return ct.inputs.registry[prefix + key] || 0;
+  };
+
+  const getGamepads = function() {
+    return navigator.getGamepads();
+  };
+
+  const addGamepad = function(gamepad) {
+    standardMapping.controllers[gamepad.index] = gamepad;
+  };
+
+  const scanGamepads = function() {
+    const gamepads = getGamepads();
+    for (let i = 0, len = gamepads.length; i < len; i++) {
+      if (gamepads[i]) {
+        const {controllers} = standardMapping;
+        if (!(gamepads[i].index in controllers)) {
+          // add new gamepad object
+          addGamepad(gamepads[i]);
+        } else {
+          // update gamepad object state
+          controllers[gamepads[i].index] = gamepads[i];
+        }
+      }
+    }
+  };
+
+  const updateStatus = function() {
+    scanGamepads();
+    let j;
+    const {controllers} = standardMapping;
+    const {buttonsMapping} = standardMapping;
+    const {axesMapping} = standardMapping;
+    for (j in controllers) {
+      /**
+       * @type {Gamepad}
+       */
+      const controller = controllers[j];
+      const buttonsLen = controller.buttons.length;
+
+      // Reset the 'any button' input
+      setRegistry('Any', 0);
+      // loop through all the known button codes and update their state
+      for (let i = 0; i < buttonsLen; i++) {
+        setRegistry(buttonsMapping[i], controller.buttons[i].value);
+        // update the 'any button', if needed
+        setRegistry('Any', Math.max(getRegistry('Any'), controller.buttons[i].value));
+        ct.gamepad.lastButton = buttonsMapping[i];
+      }
+
+      // loop through all the known axes and update their state
+      const axesLen = controller.axes.length;
+      for (let i = 0; i < axesLen; i++) {
+        setRegistry(axesMapping[i], controller.axes[i]);
+      }
+    }
+  };
+
+  ct.gamepad = Object.assign(new PIXI.utils.EventEmitter(), {
+    list: getGamepads(),
+    connected(e) {
+      ct.gamepad.emit('connected', e.gamepad, e);
+      addGamepad(e.gamepad);
+    },
+    disconnected(e) {
+      ct.gamepad.emit('disconnected', e.gamepad, e);
+      delete standardMapping.controllers[e.gamepad.index];
+    },
+    getButton: code => {
+      if (standardMapping.buttonsMapping.indexOf(code) === -1 && code !== 'Any') {
+        throw new Error(`[ct.gamepad] Attempt to get the state of a non-existing button ${code}. A typo?`);
+      }
+      return getRegistry(code);
+    },
+    getAxis: code => {
+      if (standardMapping.axesMapping.indexOf(code) === -1) {
+        throw new Error(`[ct.gamepad] Attempt to get the state of a non-existing axis ${code}. A typo?`);
+      }
+      return getRegistry(code);
+    },
+    lastButton: null
+  });
+
+  // register events
+  window.addEventListener('gamepadconnected', ct.gamepad.connected);
+  window.addEventListener('gamepaddisconnected', ct.gamepad.disconnected);
+  // register a ticker listener
+  ct.pixiApp.ticker.add(updateStatus);
+})();
 var inGameRoomStart = function (room) {
     room.crystals = 0;
+    room.lives = 3;
     room.crystalsTotal = ct.types.list['GreenCrystal'].length;
     ct.rooms.append('LayerUI', {
         isUi: true
@@ -3322,13 +3452,13 @@ ct.rooms.beforeDraw = function beforeDraw() {
     
 };
 ct.rooms.afterDraw = function afterDraw() {
-    ct.keyboard.clear();
-ct.mouse.xprev = ct.mouse.x;
+    ct.mouse.xprev = ct.mouse.x;
 ct.mouse.yprev = ct.mouse.y;
 ct.mouse.xuiprev = ct.mouse.xui;
 ct.mouse.yuiprev = ct.mouse.yui;
 ct.mouse.pressed = ct.mouse.released = false;
 ct.inputs.registry['mouse.Wheel'] = 0;
+ct.keyboard.clear();
 if (ct.sound.follow && !ct.sound.follow.kill) {
     ct.sound.howler.pos(
         ct.sound.follow.x,
@@ -3347,10 +3477,10 @@ ct.rooms.templates['poziom1'] = {
     width: 1024,
     height: 576,
     /* JSON.parse allows for a much faster loading of big objects */
-    objects: JSON.parse('[{"x":-512,"y":-128,"exts":{},"type":"trawa"},{"x":-512,"y":-64,"exts":{},"type":"skała"},{"x":-512,"y":0,"exts":{},"type":"skała"},{"x":-512,"y":64,"exts":{},"type":"skała"},{"x":-512,"y":128,"exts":{},"type":"skała"},{"x":-448,"y":-128,"exts":{},"type":"trawa"},{"x":-448,"y":128,"exts":{},"type":"trawa"},{"x":-384,"y":-128,"exts":{},"type":"trawa"},{"x":-384,"y":128,"exts":{},"type":"trawa"},{"x":-320,"y":-128,"exts":{},"type":"trawa"},{"x":-320,"y":128,"exts":{},"type":"trawa"},{"x":-256,"y":-128,"exts":{},"type":"trawa"},{"x":-256,"y":-128,"exts":{},"type":"trawa"},{"x":-256,"y":-128,"exts":{},"type":"trawa"},{"x":-256,"y":128,"exts":{},"type":"skała"},{"x":0,"y":64,"exts":{},"type":"trawa"},{"x":0,"y":128,"exts":{},"type":"skała"},{"x":0,"y":192,"exts":{},"type":"skała"},{"x":0,"y":256,"exts":{},"type":"skała"},{"x":0,"y":320,"exts":{},"type":"skała"},{"x":0,"y":384,"exts":{},"type":"skała"},{"x":0,"y":448,"exts":{},"type":"trawa"},{"x":0,"y":448,"exts":{},"type":"skała"},{"x":64,"y":448,"exts":{},"type":"trawa"},{"x":64,"y":448,"exts":{},"type":"trawa"},{"x":64,"y":448,"exts":{},"type":"skała"},{"x":64,"y":448,"exts":{},"type":"trawa"},{"x":128,"y":448,"exts":{},"type":"trawa"},{"x":128,"y":448,"exts":{},"type":"robot"},{"x":192,"y":448,"exts":{},"type":"trawa"},{"x":256,"y":448,"exts":{},"type":"trawa"},{"x":320,"y":448,"exts":{},"type":"trawa"},{"x":384,"y":448,"exts":{},"type":"trawa"},{"x":384,"y":448,"exts":{},"type":"trawa"},{"x":448,"y":448,"exts":{},"type":"trawa"},{"x":512,"y":384,"exts":{},"type":"trawa"},{"x":512,"y":448,"exts":{},"type":"skała"},{"x":512,"y":448,"exts":{},"type":"trawa"},{"x":512,"y":448,"exts":{},"type":"skała"},{"x":576,"y":128,"exts":{},"type":"pratforma"},{"x":576,"y":320,"exts":{},"type":"trawa"},{"x":576,"y":384,"exts":{},"type":"skała"},{"x":576,"y":448,"exts":{},"type":"skała"},{"x":640,"y":256,"exts":{},"type":"trawa"},{"x":640,"y":320,"exts":{},"type":"skała"},{"x":640,"y":384,"exts":{},"type":"skała"},{"x":640,"y":448,"exts":{},"type":"skała"},{"x":704,"y":192,"exts":{},"type":"trawa"},{"x":704,"y":256,"exts":{},"type":"skała"},{"x":704,"y":320,"exts":{},"type":"skała"},{"x":704,"y":384,"exts":{},"type":"skała"},{"x":704,"y":448,"exts":{},"type":"skała"},{"x":768,"y":-64,"exts":{},"type":"skała"},{"x":768,"y":-64,"exts":{},"type":"skała"},{"x":768,"y":0,"exts":{},"type":"skała"},{"x":768,"y":64,"exts":{},"type":"skała"},{"x":768,"y":128,"exts":{},"type":"skała"},{"x":768,"y":192,"exts":{},"type":"skała"},{"x":768,"y":192,"exts":{},"type":"pratforma"},{"x":768,"y":192,"exts":{},"type":"skała"},{"x":768,"y":256,"exts":{},"type":"skała"},{"x":768,"y":256,"exts":{},"type":"skała"},{"x":768,"y":320,"exts":{},"type":"skała"},{"x":768,"y":384,"exts":{},"type":"skała"},{"x":768,"y":384,"exts":{},"type":"skała"},{"x":768,"y":448,"exts":{},"type":"skała"},{"x":-256,"y":64,"exts":{},"type":"trawa"},{"x":-64,"y":0,"exts":{},"type":"pratforma"},{"x":-192,"y":-64,"exts":{},"type":"pratforma"},{"x":-896,"y":-128,"exts":{},"type":"skała"},{"x":-896,"y":-192,"exts":{},"type":"skała"},{"x":-832,"y":-192,"exts":{},"type":"skała"},{"x":-896,"y":-256,"exts":{},"type":"skała"},{"x":-960,"y":-128,"exts":{},"type":"skała"},{"x":-960,"y":-192,"exts":{},"type":"skała"},{"x":-960,"y":-256,"exts":{},"type":"skała"},{"x":-960,"y":-320,"exts":{},"type":"skała"},{"x":-768,"y":-192,"exts":{},"type":"trawa"},{"x":-832,"y":-256,"exts":{},"type":"trawa"},{"x":-896,"y":-320,"exts":{},"type":"trawa"},{"x":-960,"y":-384,"exts":{},"type":"trawa"},{"x":-832,"y":-128,"exts":{},"type":"skała"},{"x":-768,"y":-128,"exts":{},"type":"skała"},{"x":-1024,"y":-384,"exts":{},"type":"skała"},{"x":-1024,"y":-320,"exts":{},"type":"skała"},{"x":-1024,"y":-256,"exts":{},"type":"skała"},{"x":-1024,"y":-192,"exts":{},"type":"skała"},{"x":-1024,"y":-192,"exts":{},"type":"skała"},{"x":-1024,"y":-128,"exts":{},"type":"skała"},{"x":-1024,"y":-448,"exts":{},"type":"trawa"},{"x":-1024,"y":-448,"exts":{},"type":"trawa"},{"x":-1088,"y":-448,"exts":{},"type":"trawa"},{"x":-1152,"y":-448,"exts":{},"type":"trawa"},{"x":-1216,"y":-448,"exts":{},"type":"trawa"},{"x":-1280,"y":-448,"exts":{},"type":"trawa"},{"x":-1344,"y":-448,"exts":{},"type":"trawa"},{"x":-1408,"y":-448,"exts":{},"type":"trawa"},{"x":-1472,"y":-448,"exts":{},"type":"trawa"},{"x":-1536,"y":-448,"exts":{},"type":"skała"},{"x":-1536,"y":-512,"exts":{},"type":"skała"},{"x":-1536,"y":-640,"exts":{},"type":"skała"},{"x":-1536,"y":-768,"exts":{},"type":"skała"},{"x":-1536,"y":-576,"exts":{},"type":"skała"},{"x":-1536,"y":-704,"exts":{},"type":"skała"},{"x":-1536,"y":-832,"exts":{},"type":"skała"},{"x":-704,"y":-128,"exts":{},"type":"trawa"},{"x":-640,"y":-128,"exts":{},"type":"trawa"},{"x":-576,"y":-128,"exts":{},"type":"trawa"},{"x":-1536,"y":-896,"exts":{},"type":"trawa"},{"x":-192,"y":64,"exts":{},"type":"trawa"},{"x":-128,"y":64,"exts":{},"type":"trawa"},{"x":-64,"y":64,"exts":{},"type":"trawa"},{"x":64,"y":64,"exts":{},"type":"trawa"},{"x":128,"y":64,"exts":{},"type":"trawa"},{"x":192,"y":64,"exts":{},"type":"trawa"},{"x":320,"y":64,"exts":{},"type":"trawa"},{"x":320,"y":64,"exts":{},"type":"trawa"},{"x":256,"y":64,"exts":{},"type":"trawa"},{"x":448,"y":64,"exts":{},"type":"trawa"},{"x":384,"y":64,"exts":{},"type":"trawa"},{"x":512,"y":64,"exts":{},"type":"trawa"},{"x":-1472,"y":-512,"exts":{},"type":"Exit"},{"x":704,"y":64,"exts":{},"type":"GreenCrystal"},{"x":-384,"y":64,"exts":{},"type":"GreenCrystal"},{"x":-320,"y":64,"exts":{},"type":"GreenCrystal"},{"x":-832,"y":-448,"exts":{},"type":"GreenCrystal"},{"x":-1280,"y":-576,"exts":{},"type":"GreenCrystal"},{"x":-1216,"y":-512,"exts":{},"type":"GreenCrystal"},{"x":-1152,"y":-576,"exts":{},"type":"GreenCrystal"},{"x":128,"y":192,"exts":{},"type":"GreenCrystal"},{"x":192,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":256,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":320,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":384,"y":256,"exts":{},"type":"platforma_ukryta"}]'),
-    bgs: JSON.parse('[]'),
+    objects: JSON.parse('[{"x":-512,"y":-128,"exts":{},"type":"trawa"},{"x":-512,"y":128,"exts":{},"type":"skała"},{"x":-448,"y":-128,"exts":{},"type":"trawa"},{"x":-384,"y":-128,"exts":{},"type":"trawa"},{"x":-384,"y":128,"exts":{},"type":"trawa"},{"x":-320,"y":-128,"exts":{},"type":"trawa"},{"x":-320,"y":128,"exts":{},"type":"trawa"},{"x":-256,"y":-128,"exts":{},"type":"trawa"},{"x":-256,"y":-128,"exts":{},"type":"trawa"},{"x":-256,"y":-128,"exts":{},"type":"trawa"},{"x":-256,"y":128,"exts":{},"type":"skała"},{"x":0,"y":64,"exts":{},"type":"trawa"},{"x":0,"y":128,"exts":{},"type":"skała"},{"x":0,"y":192,"exts":{},"type":"skała"},{"x":0,"y":256,"exts":{},"type":"skała"},{"x":0,"y":320,"exts":{},"type":"skała"},{"x":0,"y":384,"exts":{},"type":"skała"},{"x":0,"y":448,"exts":{},"type":"trawa"},{"x":0,"y":448,"exts":{},"type":"skała"},{"x":64,"y":448,"exts":{},"type":"trawa"},{"x":64,"y":448,"exts":{},"type":"trawa"},{"x":64,"y":448,"exts":{},"type":"skała"},{"x":64,"y":448,"exts":{},"type":"trawa"},{"x":128,"y":448,"exts":{},"type":"trawa"},{"x":128,"y":448,"exts":{},"type":"robot"},{"x":192,"y":448,"exts":{},"type":"trawa"},{"x":256,"y":448,"exts":{},"type":"trawa"},{"x":320,"y":448,"exts":{},"type":"trawa"},{"x":384,"y":448,"exts":{},"type":"trawa"},{"x":384,"y":448,"exts":{},"type":"trawa"},{"x":448,"y":448,"exts":{},"type":"trawa"},{"x":512,"y":384,"exts":{},"type":"trawa"},{"x":512,"y":448,"exts":{},"type":"skała"},{"x":512,"y":448,"exts":{},"type":"trawa"},{"x":512,"y":448,"exts":{},"type":"skała"},{"x":576,"y":128,"exts":{},"type":"pratforma"},{"x":576,"y":320,"exts":{},"type":"trawa"},{"x":576,"y":384,"exts":{},"type":"skała"},{"x":576,"y":448,"exts":{},"type":"skała"},{"x":640,"y":256,"exts":{},"type":"trawa"},{"x":640,"y":320,"exts":{},"type":"skała"},{"x":640,"y":384,"exts":{},"type":"skała"},{"x":640,"y":448,"exts":{},"type":"skała"},{"x":704,"y":192,"exts":{},"type":"trawa"},{"x":704,"y":256,"exts":{},"type":"skała"},{"x":704,"y":320,"exts":{},"type":"skała"},{"x":704,"y":384,"exts":{},"type":"skała"},{"x":704,"y":448,"exts":{},"type":"skała"},{"x":768,"y":-64,"exts":{},"type":"skała"},{"x":768,"y":-64,"exts":{},"type":"skała"},{"x":768,"y":0,"exts":{},"type":"skała"},{"x":768,"y":64,"exts":{},"type":"skała"},{"x":768,"y":192,"exts":{},"type":"skała"},{"x":768,"y":192,"exts":{},"type":"pratforma"},{"x":768,"y":192,"exts":{},"type":"skała"},{"x":768,"y":256,"exts":{},"type":"skała"},{"x":768,"y":256,"exts":{},"type":"skała"},{"x":768,"y":320,"exts":{},"type":"skała"},{"x":768,"y":384,"exts":{},"type":"skała"},{"x":768,"y":384,"exts":{},"type":"skała"},{"x":768,"y":448,"exts":{},"type":"skała"},{"x":-256,"y":64,"exts":{},"type":"trawa"},{"x":-64,"y":0,"exts":{},"type":"pratforma"},{"x":-192,"y":-64,"exts":{},"type":"pratforma"},{"x":-896,"y":-128,"exts":{},"type":"skała"},{"x":-896,"y":-192,"exts":{},"type":"skała"},{"x":-832,"y":-192,"exts":{},"type":"skała"},{"x":-896,"y":-256,"exts":{},"type":"skała"},{"x":-960,"y":-128,"exts":{},"type":"skała"},{"x":-960,"y":-192,"exts":{},"type":"skała"},{"x":-960,"y":-256,"exts":{},"type":"skała"},{"x":-960,"y":-320,"exts":{},"type":"skała"},{"x":-768,"y":-192,"exts":{},"type":"trawa"},{"x":-832,"y":-256,"exts":{},"type":"trawa"},{"x":-896,"y":-320,"exts":{},"type":"trawa"},{"x":-960,"y":-384,"exts":{},"type":"trawa"},{"x":-832,"y":-128,"exts":{},"type":"skała"},{"x":-768,"y":-128,"exts":{},"type":"skała"},{"x":-1024,"y":-384,"exts":{},"type":"skała"},{"x":-1024,"y":-320,"exts":{},"type":"skała"},{"x":-1024,"y":-256,"exts":{},"type":"skała"},{"x":-1024,"y":-192,"exts":{},"type":"skała"},{"x":-1024,"y":-192,"exts":{},"type":"skała"},{"x":-1024,"y":-128,"exts":{},"type":"skała"},{"x":-1024,"y":-448,"exts":{},"type":"trawa"},{"x":-1024,"y":-448,"exts":{},"type":"trawa"},{"x":-1088,"y":-448,"exts":{},"type":"trawa"},{"x":-1152,"y":-448,"exts":{},"type":"trawa"},{"x":-1216,"y":-448,"exts":{},"type":"trawa"},{"x":-1280,"y":-448,"exts":{},"type":"trawa"},{"x":-1344,"y":-448,"exts":{},"type":"trawa"},{"x":-1408,"y":-448,"exts":{},"type":"trawa"},{"x":-1472,"y":-448,"exts":{},"type":"trawa"},{"x":-1536,"y":-448,"exts":{},"type":"skała"},{"x":-1536,"y":-512,"exts":{},"type":"skała"},{"x":-1536,"y":-640,"exts":{},"type":"skała"},{"x":-1536,"y":-768,"exts":{},"type":"skała"},{"x":-1536,"y":-576,"exts":{},"type":"skała"},{"x":-1536,"y":-704,"exts":{},"type":"skała"},{"x":-1536,"y":-832,"exts":{},"type":"skała"},{"x":-704,"y":-128,"exts":{},"type":"trawa"},{"x":-640,"y":-128,"exts":{},"type":"trawa"},{"x":-576,"y":-128,"exts":{},"type":"trawa"},{"x":-1536,"y":-896,"exts":{},"type":"trawa"},{"x":-192,"y":64,"exts":{},"type":"trawa"},{"x":-128,"y":64,"exts":{},"type":"trawa"},{"x":-64,"y":64,"exts":{},"type":"trawa"},{"x":64,"y":64,"exts":{},"type":"trawa"},{"x":128,"y":64,"exts":{},"type":"trawa"},{"x":192,"y":64,"exts":{},"type":"trawa"},{"x":256,"y":64,"exts":{},"type":"trawa"},{"x":448,"y":64,"exts":{},"type":"trawa"},{"x":384,"y":64,"exts":{},"type":"trawa"},{"x":512,"y":64,"exts":{},"type":"trawa"},{"x":-1472,"y":-512,"exts":{},"type":"LevelExit"},{"x":-384,"y":64,"exts":{},"type":"GreenCrystal"},{"x":-320,"y":64,"exts":{},"type":"GreenCrystal"},{"x":-832,"y":-448,"exts":{},"type":"GreenCrystal"},{"x":-1280,"y":-576,"exts":{},"type":"GreenCrystal"},{"x":-1216,"y":-512,"exts":{},"type":"GreenCrystal"},{"x":-1152,"y":-576,"exts":{},"type":"GreenCrystal"},{"x":128,"y":192,"exts":{},"type":"GreenCrystal"},{"x":192,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":256,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":320,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":384,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":-448,"y":128,"exts":{},"type":"trawa"},{"x":-512,"y":64,"exts":{},"type":"skała"},{"x":-512,"y":0,"exts":{},"type":"skała"},{"x":-512,"y":-64,"exts":{},"type":"skała"},{"x":283,"y":416,"exts":{},"type":"GreenCrystal"},{"x":256,"y":384,"exts":{},"type":"skrzynia"},{"x":704,"y":128,"exts":{},"type":"GreenCrystal"},{"x":768,"y":128,"exts":{},"type":"skała"},{"x":320,"y":64,"exts":{},"type":"trawa"}]'),
+    bgs: JSON.parse('[{"depth":-4,"texture":"SpringShort1_5","extends":{"parallaxX":0.2,"repeat":"repeat-x","shiftY":0,"parallaxY":0}},{"depth":-3,"texture":"SpringShort1_4","extends":{"parallaxX":0.4,"repeat":"repeat-x","shiftY":0,"parallaxY":0}},{"depth":-2,"texture":"SpringShort1_3","extends":{"parallaxX":0.6,"shiftY":0,"parallaxY":0,"repeat":"repeat-x"}},{"depth":-1,"texture":"SpringShort1_2","extends":{"parallaxX":0.9,"shiftY":0,"parallaxY":0,"repeat":"repeat-x"}}]'),
     tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
-    backgroundColor: '#000000',
+    backgroundColor: '#D1EFFD',
     
     onStep() {
         
@@ -3372,7 +3502,7 @@ ct.rooms.templates['poziom2'] = {
     width: 1024,
     height: 576,
     /* JSON.parse allows for a much faster loading of big objects */
-    objects: JSON.parse('[{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":0,"y":512,"exts":{},"type":"skała"},{"x":0,"y":512,"exts":{},"type":"Water"},{"x":0,"y":512,"exts":{},"type":"Checkpoint"},{"x":0,"y":512,"exts":{},"type":"Spikes"},{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":64,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":512,"exts":{},"type":"trawa"},{"x":128,"y":512,"exts":{},"type":"trawa"},{"x":256,"y":512,"exts":{},"type":"trawa"},{"x":320,"y":512,"exts":{},"type":"trawa"},{"x":384,"y":512,"exts":{},"type":"trawa"},{"x":640,"y":512,"exts":{},"type":"WaterTop"},{"x":960,"y":512,"exts":{},"type":"skała"},{"x":960,"y":448,"exts":{},"type":"skała"},{"x":960,"y":384,"exts":{},"type":"skała"},{"x":960,"y":320,"exts":{},"type":"skała"},{"x":896,"y":448,"exts":{},"type":"Checkpoint"},{"x":0,"y":448,"exts":{},"type":"pratforma"},{"x":128,"y":384,"exts":{},"type":"pratforma"},{"x":256,"y":320,"exts":{},"type":"pratforma"},{"x":128,"y":256,"exts":{},"type":"pratforma"},{"x":0,"y":192,"exts":{},"type":"pratforma"},{"x":256,"y":128,"exts":{},"type":"trawa"},{"x":320,"y":192,"exts":{},"type":"skała"},{"x":448,"y":192,"exts":{},"type":"skała"},{"x":448,"y":128,"exts":{},"type":"trawa"},{"x":512,"y":128,"exts":{},"type":"trawa"},{"x":576,"y":128,"exts":{},"type":"trawa"},{"x":640,"y":128,"exts":{},"type":"trawa"},{"x":704,"y":128,"exts":{},"type":"trawa"},{"x":768,"y":128,"exts":{},"type":"trawa"},{"x":832,"y":128,"exts":{},"type":"trawa"},{"x":896,"y":128,"exts":{},"type":"trawa"},{"x":1088,"y":256,"exts":{},"type":"trawa"},{"x":1216,"y":256,"exts":{},"type":"trawa"},{"x":1152,"y":256,"exts":{},"type":"trawa"},{"x":1216,"y":192,"exts":{},"type":"Spikes"},{"x":1152,"y":192,"exts":{},"type":"Spikes"},{"x":1088,"y":192,"exts":{},"type":"Spikes"},{"x":1024,"y":192,"exts":{},"type":"Spikes"},{"x":1088,"y":128,"exts":{},"type":"trawa"},{"x":1024,"y":192,"exts":{},"type":"trawa"},{"x":1216,"y":128,"exts":{},"type":"trawa"},{"x":1280,"y":256,"exts":{},"type":"trawa"},{"x":1344,"y":256,"exts":{},"type":"trawa"},{"x":1472,"y":256,"exts":{},"type":"trawa"},{"x":1408,"y":256,"exts":{},"type":"trawa"},{"x":320,"y":64,"exts":{},"type":"Checkpoint"},{"x":960,"y":192,"exts":{},"type":"Checkpoint"},{"x":1600,"y":320,"exts":{},"type":"skała"},{"x":1664,"y":320,"exts":{},"type":"skała"},{"x":1728,"y":320,"exts":{},"type":"skała"},{"x":1792,"y":320,"exts":{},"type":"skała"},{"x":1856,"y":320,"exts":{},"type":"skała"},{"x":1920,"y":320,"exts":{},"type":"skała"},{"x":1984,"y":320,"exts":{},"type":"skała"},{"x":2112,"y":320,"exts":{},"type":"skała"},{"x":2112,"y":320,"exts":{},"type":"skała"},{"x":2048,"y":320,"exts":{},"type":"skała"},{"x":2176,"y":320,"exts":{},"type":"skała"},{"x":2304,"y":320,"exts":{},"type":"skała"},{"x":2240,"y":320,"exts":{},"type":"skała"},{"x":2304,"y":256,"exts":{},"type":"trawa"},{"x":2368,"y":256,"exts":{},"type":"trawa"},{"x":2432,"y":256,"exts":{},"type":"trawa"},{"x":2496,"y":256,"exts":{},"type":"trawa"},{"x":2944,"y":256,"exts":{},"type":"skała"},{"x":2944,"y":192,"exts":{},"type":"skała"},{"x":2944,"y":128,"exts":{},"type":"skała"},{"x":2944,"y":64,"exts":{},"type":"skała"},{"x":2944,"y":0,"exts":{},"type":"skała"},{"x":2944,"y":-64,"exts":{},"type":"skała"},{"x":1600,"y":256,"exts":{},"type":"Spikes"},{"x":1664,"y":256,"exts":{},"type":"Spikes"},{"x":1728,"y":256,"exts":{},"type":"Spikes"},{"x":1792,"y":256,"exts":{},"type":"Spikes"},{"x":1856,"y":256,"exts":{},"type":"Spikes"},{"x":1920,"y":256,"exts":{},"type":"Spikes"},{"x":1984,"y":256,"exts":{},"type":"Spikes"},{"x":2048,"y":256,"exts":{},"type":"Spikes"},{"x":2112,"y":256,"exts":{},"type":"Spikes"},{"x":2176,"y":256,"exts":{},"type":"Spikes"},{"x":2240,"y":256,"exts":{},"type":"Spikes"},{"x":1664,"y":192,"exts":{},"type":"pratforma"},{"x":1792,"y":192,"exts":{},"type":"pratforma"},{"x":1920,"y":192,"exts":{},"type":"pratforma"},{"x":2048,"y":192,"exts":{},"type":"pratforma"},{"x":2176,"y":192,"exts":{},"type":"pratforma"},{"x":64,"y":256,"exts":{},"type":"pratforma"},{"x":192,"y":384,"exts":{},"type":"pratforma"},{"x":832,"y":512,"exts":{},"type":"robot"},{"x":704,"y":512,"exts":{},"type":"trawa"},{"x":768,"y":512,"exts":{},"type":"trawa"},{"x":896,"y":512,"exts":{},"type":"trawa"},{"x":832,"y":512,"exts":{},"type":"trawa"},{"x":2560,"y":256,"exts":{},"type":"trawa"},{"x":2624,"y":256,"exts":{},"type":"trawa"},{"x":2752,"y":256,"exts":{},"type":"trawa"},{"x":2752,"y":256,"exts":{},"type":"trawa"},{"x":2688,"y":256,"exts":{},"type":"trawa"},{"x":2816,"y":256,"exts":{},"type":"trawa"},{"x":2880,"y":256,"exts":{},"type":"trawa"},{"x":2944,"y":-128,"exts":{},"type":"trawa"},{"x":320,"y":128,"exts":{},"type":"trawa"},{"x":384,"y":192,"exts":{},"type":"trawa"},{"x":960,"y":256,"exts":{},"type":"trawa"},{"x":1536,"y":256,"exts":{},"type":"trawa"},{"x":384,"y":128,"exts":{},"type":"Spikes"},{"x":448,"y":512,"exts":{},"type":"WaterTop"},{"x":576,"y":512,"exts":{},"type":"trawa"},{"x":512,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":128,"exts":{},"type":"pratforma"},{"x":128,"y":128,"exts":{},"type":"pratforma"},{"x":2880,"y":192,"exts":{},"type":"Exit"},{"x":128,"y":320,"exts":{},"type":"GreenCrystal"},{"x":448,"y":64,"exts":{},"type":"GreenCrystal"},{"x":384,"y":64,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":128,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":192,"exts":{},"type":"Checkpoint"}]'),
+    objects: JSON.parse('[{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":0,"y":512,"exts":{},"type":"skała"},{"x":0,"y":512,"exts":{},"type":"Water"},{"x":0,"y":512,"exts":{},"type":"Checkpoint"},{"x":0,"y":512,"exts":{},"type":"Spikes"},{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":64,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":512,"exts":{},"type":"trawa"},{"x":128,"y":512,"exts":{},"type":"trawa"},{"x":256,"y":512,"exts":{},"type":"trawa"},{"x":320,"y":512,"exts":{},"type":"trawa"},{"x":384,"y":512,"exts":{},"type":"trawa"},{"x":960,"y":512,"exts":{},"type":"skała"},{"x":960,"y":448,"exts":{},"type":"skała"},{"x":960,"y":384,"exts":{},"type":"skała"},{"x":960,"y":320,"exts":{},"type":"skała"},{"x":0,"y":448,"exts":{},"type":"pratforma"},{"x":128,"y":384,"exts":{},"type":"pratforma"},{"x":256,"y":320,"exts":{},"type":"pratforma"},{"x":128,"y":256,"exts":{},"type":"pratforma"},{"x":0,"y":192,"exts":{},"type":"pratforma"},{"x":256,"y":128,"exts":{},"type":"trawa"},{"x":320,"y":192,"exts":{},"type":"skała"},{"x":448,"y":192,"exts":{},"type":"skała"},{"x":448,"y":128,"exts":{},"type":"trawa"},{"x":512,"y":128,"exts":{},"type":"trawa"},{"x":576,"y":128,"exts":{},"type":"trawa"},{"x":640,"y":128,"exts":{},"type":"trawa"},{"x":704,"y":128,"exts":{},"type":"trawa"},{"x":768,"y":128,"exts":{},"type":"trawa"},{"x":832,"y":128,"exts":{},"type":"trawa"},{"x":896,"y":128,"exts":{},"type":"trawa"},{"x":1088,"y":256,"exts":{},"type":"trawa"},{"x":1216,"y":256,"exts":{},"type":"trawa"},{"x":1152,"y":256,"exts":{},"type":"trawa"},{"x":1024,"y":192,"exts":{},"type":"Spikes"},{"x":1088,"y":128,"exts":{},"type":"trawa"},{"x":1024,"y":192,"exts":{},"type":"trawa"},{"x":1216,"y":128,"exts":{},"type":"trawa"},{"x":1280,"y":256,"exts":{},"type":"trawa"},{"x":1344,"y":256,"exts":{},"type":"trawa"},{"x":1472,"y":256,"exts":{},"type":"trawa"},{"x":1408,"y":256,"exts":{},"type":"trawa"},{"x":320,"y":64,"exts":{},"type":"Checkpoint"},{"x":960,"y":192,"exts":{},"type":"Checkpoint"},{"x":2368,"y":256,"exts":{},"type":"trawa"},{"x":2432,"y":256,"exts":{},"type":"trawa"},{"x":2496,"y":256,"exts":{},"type":"trawa"},{"x":2944,"y":256,"exts":{},"type":"skała"},{"x":2944,"y":192,"exts":{},"type":"skała"},{"x":2944,"y":128,"exts":{},"type":"skała"},{"x":2944,"y":64,"exts":{},"type":"skała"},{"x":2944,"y":0,"exts":{},"type":"skała"},{"x":2944,"y":-64,"exts":{},"type":"skała"},{"x":1664,"y":192,"exts":{},"type":"pratforma"},{"x":1792,"y":192,"exts":{},"type":"pratforma"},{"x":1920,"y":192,"exts":{},"type":"pratforma"},{"x":2048,"y":192,"exts":{},"type":"pratforma"},{"x":2176,"y":192,"exts":{},"type":"pratforma"},{"x":64,"y":256,"exts":{},"type":"pratforma"},{"x":832,"y":512,"exts":{},"type":"robot"},{"x":704,"y":512,"exts":{},"type":"trawa"},{"x":768,"y":512,"exts":{},"type":"trawa"},{"x":896,"y":512,"exts":{},"type":"trawa"},{"x":832,"y":512,"exts":{},"type":"trawa"},{"x":2560,"y":256,"exts":{},"type":"trawa"},{"x":2624,"y":256,"exts":{},"type":"trawa"},{"x":2752,"y":256,"exts":{},"type":"trawa"},{"x":2752,"y":256,"exts":{},"type":"trawa"},{"x":2688,"y":256,"exts":{},"type":"trawa"},{"x":2816,"y":256,"exts":{},"type":"trawa"},{"x":2880,"y":256,"exts":{},"type":"trawa"},{"x":2944,"y":-128,"exts":{},"type":"trawa"},{"x":320,"y":128,"exts":{},"type":"trawa"},{"x":384,"y":192,"exts":{},"type":"trawa"},{"x":960,"y":256,"exts":{},"type":"trawa"},{"x":1536,"y":256,"exts":{},"type":"trawa"},{"x":576,"y":512,"exts":{},"type":"trawa"},{"x":512,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":128,"exts":{},"type":"pratforma"},{"x":128,"y":128,"exts":{},"type":"pratforma"},{"x":2880,"y":192,"exts":{},"type":"LevelExit"},{"x":128,"y":320,"exts":{},"type":"GreenCrystal"},{"x":448,"y":64,"exts":{},"type":"GreenCrystal"},{"x":384,"y":64,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":128,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":192,"exts":{},"type":"Checkpoint"},{"x":576,"y":64,"exts":{},"type":"Heart"},{"x":256,"y":256,"exts":{},"type":"Heart"},{"x":-64,"y":512,"exts":{},"type":"skała"},{"x":-64,"y":512,"exts":{},"type":"skała"},{"x":-64,"y":448,"exts":{},"type":"skała"},{"x":-64,"y":384,"exts":{},"type":"skała"},{"x":-64,"y":320,"exts":{},"type":"skała"},{"x":-64,"y":256,"exts":{},"type":"skała"},{"x":-64,"y":192,"exts":{},"type":"skała"},{"x":-64,"y":128,"exts":{},"type":"skała"},{"x":-64,"y":128,"exts":{},"type":"skała"},{"x":-64,"y":64,"exts":{},"type":"skała"},{"x":-64,"y":0,"exts":{},"type":"skała"},{"x":-64,"y":-64,"exts":{},"type":"trawa"},{"x":448,"y":512,"exts":{},"type":"lava2-top"},{"x":640,"y":512,"exts":{},"type":"lava2-top"},{"x":384,"y":128,"exts":{},"type":"kolce"},{"x":1088,"y":192,"exts":{},"type":"kolce"},{"x":1152,"y":192,"exts":{},"type":"kolce"},{"x":1216,"y":192,"exts":{},"type":"kolce"},{"x":1536,"y":320,"exts":{},"type":"skała"},{"x":1024,"y":256,"exts":{},"type":"skała"},{"x":2304,"y":320,"exts":{},"type":"skała"},{"x":2304,"y":256,"exts":{},"type":"trawa"},{"x":1600,"y":320,"exts":{},"type":"trawa"},{"x":1664,"y":320,"exts":{},"type":"trawa"},{"x":1728,"y":320,"exts":{},"type":"trawa"},{"x":1792,"y":320,"exts":{},"type":"trawa"},{"x":1856,"y":320,"exts":{},"type":"trawa"},{"x":1920,"y":320,"exts":{},"type":"trawa"},{"x":1984,"y":320,"exts":{},"type":"trawa"},{"x":2048,"y":320,"exts":{},"type":"trawa"},{"x":2112,"y":320,"exts":{},"type":"trawa"},{"x":2176,"y":320,"exts":{},"type":"trawa"},{"x":2240,"y":320,"exts":{},"type":"trawa"},{"x":1600,"y":256,"exts":{},"type":"kolce"},{"x":1664,"y":256,"exts":{},"type":"kolce"},{"x":1728,"y":256,"exts":{},"type":"kolce"},{"x":1792,"y":256,"exts":{},"type":"kolce"},{"x":1920,"y":256,"exts":{},"type":"kolce"},{"x":1856,"y":256,"exts":{},"type":"kolce"},{"x":1984,"y":256,"exts":{},"type":"kolce"},{"x":2048,"y":256,"exts":{},"type":"kolce"},{"x":2112,"y":256,"exts":{},"type":"kolce"},{"x":2176,"y":256,"exts":{},"type":"kolce"},{"x":2240,"y":256,"exts":{},"type":"kolce"},{"x":192,"y":384,"exts":{},"type":"pratforma"},{"x":351,"y":495,"exts":{},"type":"GreenCrystal"},{"x":320,"y":448,"exts":{},"type":"skrzynia"}]'),
     bgs: JSON.parse('[{"depth":-1,"texture":"BG","extends":{}}]'),
     tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
     backgroundColor: '#000000',
@@ -3397,7 +3527,7 @@ ct.rooms.templates['LayerUI'] = {
     width: 1024,
     height: 576,
     /* JSON.parse allows for a much faster loading of big objects */
-    objects: JSON.parse('[{"x":64,"y":64,"exts":{},"type":"CrystalsWidget"}]'),
+    objects: JSON.parse('[{"x":64,"y":64,"exts":{},"type":"liczbak"},{"x":64,"y":128,"exts":{},"type":"liczbazyc"}]'),
     bgs: JSON.parse('[]'),
     tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
     backgroundColor: '#000000',
@@ -3423,7 +3553,7 @@ ct.rooms.templates['poziom3'] = {
     width: 800,
     height: 600,
     /* JSON.parse allows for a much faster loading of big objects */
-    objects: JSON.parse('[{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":64,"y":512,"exts":{},"type":"trawa"},{"x":128,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":512,"exts":{},"type":"WaterTop"},{"x":256,"y":512,"exts":{},"type":"WaterTop"},{"x":320,"y":512,"exts":{},"type":"WaterTop"},{"x":384,"y":512,"exts":{},"type":"WaterTop"},{"x":448,"y":512,"exts":{},"type":"WaterTop"},{"x":512,"y":512,"exts":{},"type":"WaterTop"},{"x":576,"y":512,"exts":{},"type":"WaterTop"},{"x":640,"y":512,"exts":{},"type":"WaterTop"},{"x":704,"y":512,"exts":{},"type":"WaterTop"},{"x":192,"y":448,"exts":{},"type":"pratforma"},{"x":256,"y":384,"exts":{},"type":"pratforma"},{"x":320,"y":320,"exts":{},"type":"pratforma"},{"x":384,"y":256,"exts":{},"type":"pratforma"},{"x":448,"y":256,"exts":{},"type":"pratforma"},{"x":512,"y":256,"exts":{},"type":"pratforma"},{"x":512,"y":192,"exts":{},"type":"pratforma"},{"x":576,"y":192,"exts":{},"type":"pratforma"},{"x":704,"y":128,"exts":{},"type":"trawa"},{"x":768,"y":128,"exts":{},"type":"trawa"},{"x":832,"y":128,"exts":{},"type":"trawa"},{"x":896,"y":128,"exts":{},"type":"trawa"},{"x":960,"y":128,"exts":{},"type":"trawa"},{"x":1024,"y":192,"exts":{},"type":"skała"},{"x":1152,"y":192,"exts":{},"type":"skała"},{"x":1024,"y":256,"exts":{},"type":"skała"},{"x":1088,"y":256,"exts":{},"type":"trawa"},{"x":768,"y":512,"exts":{},"type":"trawa"},{"x":1152,"y":128,"exts":{},"type":"trawa"},{"x":1280,"y":128,"exts":{},"type":"trawa"},{"x":1216,"y":128,"exts":{},"type":"trawa"},{"x":1344,"y":128,"exts":{},"type":"trawa"},{"x":1408,"y":128,"exts":{},"type":"trawa"},{"x":1472,"y":128,"exts":{},"type":"trawa"},{"x":1536,"y":128,"exts":{},"type":"trawa"},{"x":1600,"y":128,"exts":{},"type":"trawa"},{"x":1088,"y":192,"exts":{},"type":"Water"},{"x":1088,"y":128,"exts":{},"type":"WaterTop"},{"x":1472,"y":64,"exts":{},"type":"Spikes"},{"x":1408,"y":64,"exts":{},"type":"Spikes"},{"x":1408,"y":64,"exts":{},"type":"pratforma"},{"x":1728,"y":128,"exts":{},"type":"trawa"},{"x":1664,"y":128,"exts":{},"type":"trawa"},{"x":1984,"y":128,"exts":{},"type":"trawa"},{"x":1984,"y":192,"exts":{},"type":"skała"},{"x":1920,"y":192,"exts":{},"type":"trawa"},{"x":1856,"y":256,"exts":{},"type":"trawa"},{"x":1792,"y":320,"exts":{},"type":"trawa"},{"x":1856,"y":320,"exts":{},"type":"skała"},{"x":1920,"y":256,"exts":{},"type":"skała"},{"x":1920,"y":320,"exts":{},"type":"skała"},{"x":1984,"y":256,"exts":{},"type":"skała"},{"x":1984,"y":320,"exts":{},"type":"skała"},{"x":1664,"y":320,"exts":{},"type":"trawa"},{"x":1664,"y":320,"exts":{},"type":"trawa"},{"x":1536,"y":320,"exts":{},"type":"trawa"},{"x":1408,"y":320,"exts":{},"type":"trawa"},{"x":1280,"y":320,"exts":{},"type":"trawa"},{"x":1664,"y":384,"exts":{},"type":"skała"},{"x":1856,"y":384,"exts":{},"type":"skała"},{"x":1920,"y":384,"exts":{},"type":"skała"},{"x":1984,"y":384,"exts":{},"type":"skała"},{"x":1600,"y":384,"exts":{},"type":"trawa"},{"x":1344,"y":384,"exts":{},"type":"trawa"},{"x":1408,"y":384,"exts":{},"type":"skała"},{"x":2176,"y":128,"exts":{},"type":"trawa"},{"x":2240,"y":128,"exts":{},"type":"trawa"},{"x":2304,"y":64,"exts":{},"type":"trawa"},{"x":2368,"y":0,"exts":{},"type":"trawa"},{"x":2432,"y":-64,"exts":{},"type":"trawa"},{"x":2496,"y":-128,"exts":{},"type":"trawa"},{"x":2560,"y":-192,"exts":{},"type":"trawa"},{"x":2624,"y":-256,"exts":{},"type":"trawa"},{"x":2688,"y":-256,"exts":{},"type":"trawa"},{"x":2752,"y":-256,"exts":{},"type":"trawa"},{"x":2816,"y":-256,"exts":{},"type":"trawa"},{"x":2880,"y":-256,"exts":{},"type":"trawa"},{"x":2944,"y":-256,"exts":{},"type":"skała"},{"x":2944,"y":-320,"exts":{},"type":"skała"},{"x":2944,"y":-384,"exts":{},"type":"skała"},{"x":2944,"y":-448,"exts":{},"type":"skała"},{"x":2944,"y":-512,"exts":{},"type":"skała"},{"x":2944,"y":-576,"exts":{},"type":"skała"},{"x":2944,"y":-640,"exts":{},"type":"trawa"},{"x":-64,"y":512,"exts":{},"type":"skała"},{"x":-64,"y":448,"exts":{},"type":"skała"},{"x":-64,"y":384,"exts":{},"type":"skała"},{"x":-64,"y":320,"exts":{},"type":"trawa"},{"x":640,"y":128,"exts":{},"type":"trawa"},{"x":1600,"y":320,"exts":{},"type":"Spikes"},{"x":1344,"y":320,"exts":{},"type":"Spikes"},{"x":1536,"y":384,"exts":{},"type":"skała"},{"x":1856,"y":384,"exts":{},"type":"skała"},{"x":1792,"y":384,"exts":{},"type":"skała"},{"x":1664,"y":448,"exts":{},"type":"skała"},{"x":1856,"y":448,"exts":{},"type":"skała"},{"x":1792,"y":448,"exts":{},"type":"skała"},{"x":1920,"y":448,"exts":{},"type":"skała"},{"x":1984,"y":448,"exts":{},"type":"skała"},{"x":1600,"y":448,"exts":{},"type":"skała"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1408,"y":448,"exts":{},"type":"skała"},{"x":1408,"y":448,"exts":{},"type":"skała"},{"x":1152,"y":448,"exts":{},"type":"skała"},{"x":1216,"y":448,"exts":{},"type":"trawa"},{"x":1472,"y":448,"exts":{},"type":"trawa"},{"x":1728,"y":448,"exts":{},"type":"trawa"},{"x":1280,"y":448,"exts":{},"type":"trawa"},{"x":1344,"y":448,"exts":{},"type":"skała"},{"x":1280,"y":448,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":448,"exts":{},"type":"skała"},{"x":1280,"y":384,"exts":{},"type":"skała"},{"x":1088,"y":448,"exts":{},"type":"skała"},{"x":1088,"y":384,"exts":{},"type":"skała"},{"x":1088,"y":320,"exts":{},"type":"skała"},{"x":1216,"y":448,"exts":{},"type":"skała"},{"x":1152,"y":384,"exts":{},"type":"trawa"},{"x":1216,"y":384,"exts":{},"type":"trawa"},{"x":1536,"y":320,"exts":{},"type":"trawa"},{"x":1472,"y":320,"exts":{},"type":"trawa"},{"x":1728,"y":320,"exts":{},"type":"trawa"},{"x":1536,"y":448,"exts":{},"type":"Water"},{"x":1472,"y":384,"exts":{},"type":"Water"},{"x":1728,"y":384,"exts":{},"type":"Water"},{"x":1536,"y":448,"exts":{},"type":"Water"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1728,"y":448,"exts":{},"type":"skała"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1472,"y":448,"exts":{},"type":"skała"},{"x":1216,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1280,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1344,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1472,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1600,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1664,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1728,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1472,"y":0,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":0,"exts":{},"type":"GreenCrystal"},{"x":2880,"y":-320,"exts":{},"type":"Exit"},{"x":64,"y":512,"exts":{},"type":"robot"},{"x":1024,"y":128,"exts":{},"type":"trawa"},{"x":2048,"y":128,"exts":{},"type":"trawa"},{"x":2176,"y":128,"exts":{},"type":"trawa"},{"x":2112,"y":128,"exts":{},"type":"trawa"},{"x":1344,"y":64,"exts":{},"type":"Spikes"}]'),
+    objects: JSON.parse('[{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":64,"y":512,"exts":{},"type":"trawa"},{"x":128,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":448,"exts":{},"type":"pratforma"},{"x":256,"y":384,"exts":{},"type":"pratforma"},{"x":320,"y":320,"exts":{},"type":"pratforma"},{"x":384,"y":256,"exts":{},"type":"pratforma"},{"x":448,"y":256,"exts":{},"type":"pratforma"},{"x":512,"y":256,"exts":{},"type":"pratforma"},{"x":512,"y":192,"exts":{},"type":"pratforma"},{"x":576,"y":192,"exts":{},"type":"pratforma"},{"x":704,"y":128,"exts":{},"type":"trawa"},{"x":768,"y":128,"exts":{},"type":"trawa"},{"x":832,"y":128,"exts":{},"type":"trawa"},{"x":896,"y":128,"exts":{},"type":"trawa"},{"x":960,"y":128,"exts":{},"type":"trawa"},{"x":1024,"y":192,"exts":{},"type":"skała"},{"x":1152,"y":192,"exts":{},"type":"skała"},{"x":1024,"y":256,"exts":{},"type":"skała"},{"x":1088,"y":256,"exts":{},"type":"trawa"},{"x":1152,"y":128,"exts":{},"type":"trawa"},{"x":1280,"y":128,"exts":{},"type":"trawa"},{"x":1216,"y":128,"exts":{},"type":"trawa"},{"x":1344,"y":128,"exts":{},"type":"trawa"},{"x":1408,"y":64,"exts":{},"type":"pratforma"},{"x":1728,"y":128,"exts":{},"type":"trawa"},{"x":1984,"y":128,"exts":{},"type":"trawa"},{"x":1984,"y":192,"exts":{},"type":"skała"},{"x":1920,"y":192,"exts":{},"type":"trawa"},{"x":1856,"y":256,"exts":{},"type":"trawa"},{"x":1792,"y":320,"exts":{},"type":"trawa"},{"x":1856,"y":320,"exts":{},"type":"skała"},{"x":1920,"y":256,"exts":{},"type":"skała"},{"x":1920,"y":320,"exts":{},"type":"skała"},{"x":1984,"y":256,"exts":{},"type":"skała"},{"x":1984,"y":320,"exts":{},"type":"skała"},{"x":1664,"y":320,"exts":{},"type":"trawa"},{"x":1664,"y":320,"exts":{},"type":"trawa"},{"x":1536,"y":320,"exts":{},"type":"trawa"},{"x":1408,"y":320,"exts":{},"type":"trawa"},{"x":1280,"y":320,"exts":{},"type":"trawa"},{"x":1664,"y":384,"exts":{},"type":"skała"},{"x":1856,"y":384,"exts":{},"type":"skała"},{"x":1920,"y":384,"exts":{},"type":"skała"},{"x":1984,"y":384,"exts":{},"type":"skała"},{"x":1600,"y":384,"exts":{},"type":"trawa"},{"x":1344,"y":384,"exts":{},"type":"trawa"},{"x":1408,"y":384,"exts":{},"type":"skała"},{"x":2176,"y":128,"exts":{},"type":"trawa"},{"x":2240,"y":128,"exts":{},"type":"trawa"},{"x":2304,"y":64,"exts":{},"type":"trawa"},{"x":2368,"y":0,"exts":{},"type":"trawa"},{"x":2432,"y":-64,"exts":{},"type":"trawa"},{"x":2496,"y":-128,"exts":{},"type":"trawa"},{"x":2560,"y":-192,"exts":{},"type":"trawa"},{"x":2624,"y":-256,"exts":{},"type":"trawa"},{"x":2688,"y":-256,"exts":{},"type":"trawa"},{"x":2752,"y":-256,"exts":{},"type":"trawa"},{"x":2816,"y":-256,"exts":{},"type":"trawa"},{"x":2880,"y":-256,"exts":{},"type":"trawa"},{"x":2944,"y":-256,"exts":{},"type":"skała"},{"x":2944,"y":-320,"exts":{},"type":"skała"},{"x":2944,"y":-384,"exts":{},"type":"skała"},{"x":2944,"y":-448,"exts":{},"type":"skała"},{"x":2944,"y":-512,"exts":{},"type":"skała"},{"x":2944,"y":-576,"exts":{},"type":"skała"},{"x":2944,"y":-640,"exts":{},"type":"trawa"},{"x":-64,"y":512,"exts":{},"type":"skała"},{"x":-64,"y":448,"exts":{},"type":"skała"},{"x":-64,"y":384,"exts":{},"type":"skała"},{"x":-64,"y":320,"exts":{},"type":"trawa"},{"x":640,"y":128,"exts":{},"type":"trawa"},{"x":1536,"y":384,"exts":{},"type":"skała"},{"x":1856,"y":384,"exts":{},"type":"skała"},{"x":1792,"y":384,"exts":{},"type":"skała"},{"x":1664,"y":448,"exts":{},"type":"skała"},{"x":1856,"y":448,"exts":{},"type":"skała"},{"x":1792,"y":448,"exts":{},"type":"skała"},{"x":1920,"y":448,"exts":{},"type":"skała"},{"x":1984,"y":448,"exts":{},"type":"skała"},{"x":1600,"y":448,"exts":{},"type":"skała"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1408,"y":448,"exts":{},"type":"skała"},{"x":1408,"y":448,"exts":{},"type":"skała"},{"x":1152,"y":448,"exts":{},"type":"skała"},{"x":1216,"y":448,"exts":{},"type":"trawa"},{"x":1472,"y":448,"exts":{},"type":"trawa"},{"x":1728,"y":448,"exts":{},"type":"trawa"},{"x":1280,"y":448,"exts":{},"type":"trawa"},{"x":1344,"y":448,"exts":{},"type":"skała"},{"x":1280,"y":448,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":384,"exts":{},"type":"skała"},{"x":1344,"y":448,"exts":{},"type":"skała"},{"x":1280,"y":384,"exts":{},"type":"skała"},{"x":1088,"y":448,"exts":{},"type":"skała"},{"x":1088,"y":384,"exts":{},"type":"skała"},{"x":1088,"y":320,"exts":{},"type":"skała"},{"x":1216,"y":448,"exts":{},"type":"skała"},{"x":1152,"y":384,"exts":{},"type":"trawa"},{"x":1216,"y":384,"exts":{},"type":"trawa"},{"x":1536,"y":320,"exts":{},"type":"trawa"},{"x":1472,"y":320,"exts":{},"type":"trawa"},{"x":1728,"y":320,"exts":{},"type":"trawa"},{"x":1536,"y":448,"exts":{},"type":"Water"},{"x":1536,"y":448,"exts":{},"type":"Water"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1728,"y":448,"exts":{},"type":"skała"},{"x":1536,"y":448,"exts":{},"type":"skała"},{"x":1472,"y":448,"exts":{},"type":"skała"},{"x":1216,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1280,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1344,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1472,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1600,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1664,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1728,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1472,"y":0,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":0,"exts":{},"type":"GreenCrystal"},{"x":2880,"y":-320,"exts":{},"type":"LevelExit"},{"x":64,"y":512,"exts":{},"type":"robot"},{"x":1024,"y":128,"exts":{},"type":"trawa"},{"x":2048,"y":128,"exts":{},"type":"trawa"},{"x":2176,"y":128,"exts":{},"type":"trawa"},{"x":2112,"y":128,"exts":{},"type":"trawa"},{"x":1600,"y":64,"exts":{},"type":"skała"},{"x":1536,"y":0,"exts":{},"type":"pratforma"},{"x":1920,"y":0,"exts":{},"type":"Platform"},{"x":1600,"y":0,"exts":{},"type":"trawa"},{"x":1664,"y":64,"exts":{},"type":"trawa"},{"x":192,"y":512,"exts":{},"type":"lava2-top"},{"x":256,"y":512,"exts":{},"type":"lava2-top"},{"x":320,"y":512,"exts":{},"type":"lava2-top"},{"x":384,"y":512,"exts":{},"type":"lava2-top"},{"x":448,"y":512,"exts":{},"type":"lava2-top"},{"x":512,"y":512,"exts":{},"type":"lava2-top"},{"x":576,"y":512,"exts":{},"type":"lava2-top"},{"x":704,"y":512,"exts":{},"type":"lava2-top"},{"x":640,"y":512,"exts":{},"type":"lava2-top"},{"x":768,"y":512,"exts":{},"type":"lava2-top"},{"x":832,"y":512,"exts":{},"type":"trawa"},{"x":1088,"y":128,"exts":{},"type":"lava2-top"},{"x":1088,"y":192,"exts":{},"type":"lava2"},{"x":1472,"y":384,"exts":{},"type":"lava2"},{"x":1728,"y":384,"exts":{},"type":"lava2"},{"x":1408,"y":128,"exts":{},"type":"trawa"},{"x":1472,"y":128,"exts":{},"type":"trawa"},{"x":1536,"y":128,"exts":{},"type":"trawa"},{"x":1600,"y":128,"exts":{},"type":"skała"},{"x":1664,"y":128,"exts":{},"type":"skała"},{"x":1344,"y":64,"exts":{},"type":"kolce"},{"x":1408,"y":64,"exts":{},"type":"kolce"},{"x":1472,"y":64,"exts":{},"type":"kolce"},{"x":1344,"y":320,"exts":{},"type":"kolce"},{"x":1600,"y":320,"exts":{},"type":"kolce"},{"x":1984,"y":64,"exts":{},"type":"kolce"},{"x":2048,"y":64,"exts":{},"type":"kolce"},{"x":2112,"y":64,"exts":{},"type":"kolce"},{"x":2176,"y":64,"exts":{},"type":"kolce"},{"x":2240,"y":64,"exts":{},"type":"kolce"},{"x":863,"y":107,"exts":{},"type":"GreenCrystal"},{"x":832,"y":64,"exts":{},"type":"skrzynia"}]'),
     bgs: JSON.parse('[{"depth":-1,"texture":"BG","extends":{}}]'),
     tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
     backgroundColor: '#000000',
@@ -3438,8 +3568,293 @@ ct.rooms.templates['poziom3'] = {
         
     },
     onCreate() {
-        this.nextRoom = 'poziom1';
+        this.nextRoom = 'poziom4';
 inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom4'] = {
+    name: 'poziom4',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":64,"y":512,"exts":{},"type":"trawa"},{"x":128,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":512,"exts":{},"type":"trawa"},{"x":256,"y":512,"exts":{},"type":"trawa"},{"x":0,"y":512,"exts":{},"type":"skała"},{"x":0,"y":448,"exts":{},"type":"skała"},{"x":0,"y":384,"exts":{},"type":"skała"},{"x":0,"y":320,"exts":{},"type":"skała"},{"x":0,"y":256,"exts":{},"type":"trawa"},{"x":1024,"y":512,"exts":{},"type":"trawa"},{"x":1088,"y":512,"exts":{},"type":"trawa"},{"x":1152,"y":512,"exts":{},"type":"trawa"},{"x":1216,"y":512,"exts":{},"type":"skała"},{"x":1216,"y":448,"exts":{},"type":"trawa"},{"x":1280,"y":512,"exts":{},"type":"skała"},{"x":1344,"y":512,"exts":{},"type":"trawa"},{"x":1408,"y":512,"exts":{},"type":"trawa"},{"x":1472,"y":512,"exts":{},"type":"trawa"},{"x":1536,"y":512,"exts":{},"type":"trawa"},{"x":1600,"y":512,"exts":{},"type":"trawa"},{"x":2432,"y":512,"exts":{},"type":"trawa"},{"x":2560,"y":512,"exts":{},"type":"trawa"},{"x":2496,"y":512,"exts":{},"type":"trawa"},{"x":2624,"y":512,"exts":{},"type":"trawa"},{"x":2688,"y":512,"exts":{},"type":"trawa"},{"x":2752,"y":512,"exts":{},"type":"trawa"},{"x":2816,"y":512,"exts":{},"type":"trawa"},{"x":2880,"y":512,"exts":{},"type":"trawa"},{"x":2944,"y":512,"exts":{},"type":"trawa"},{"x":3008,"y":512,"exts":{},"type":"trawa"},{"x":3072,"y":512,"exts":{},"type":"trawa"},{"x":3136,"y":512,"exts":{},"type":"trawa"},{"x":3200,"y":512,"exts":{},"type":"trawa"},{"x":3264,"y":512,"exts":{},"type":"trawa"},{"x":3392,"y":512,"exts":{},"type":"trawa"},{"x":3456,"y":512,"exts":{},"type":"trawa"},{"x":3520,"y":512,"exts":{},"type":"trawa"},{"x":3584,"y":512,"exts":{},"type":"trawa"},{"x":3648,"y":512,"exts":{},"type":"trawa"},{"x":3712,"y":512,"exts":{},"type":"trawa"},{"x":3776,"y":512,"exts":{},"type":"trawa"},{"x":3840,"y":512,"exts":{},"type":"trawa"},{"x":3904,"y":512,"exts":{},"type":"skała"},{"x":3968,"y":512,"exts":{},"type":"skała"},{"x":3968,"y":448,"exts":{},"type":"trawa"},{"x":4032,"y":512,"exts":{},"type":"trawa"},{"x":4096,"y":512,"exts":{},"type":"trawa"},{"x":4160,"y":512,"exts":{},"type":"trawa"},{"x":4224,"y":512,"exts":{},"type":"trawa"},{"x":4288,"y":512,"exts":{},"type":"trawa"},{"x":4352,"y":512,"exts":{},"type":"trawa"},{"x":4416,"y":512,"exts":{},"type":"trawa"},{"x":4480,"y":512,"exts":{},"type":"trawa"},{"x":4544,"y":512,"exts":{},"type":"trawa"},{"x":4608,"y":512,"exts":{},"type":"trawa"},{"x":4672,"y":512,"exts":{},"type":"skała"},{"x":4672,"y":448,"exts":{},"type":"skała"},{"x":4672,"y":384,"exts":{},"type":"skała"},{"x":4672,"y":320,"exts":{},"type":"skała"},{"x":4672,"y":256,"exts":{},"type":"skała"},{"x":4672,"y":192,"exts":{},"type":"skała"},{"x":4672,"y":128,"exts":{},"type":"skała"},{"x":4672,"y":64,"exts":{},"type":"trawa"},{"x":4608,"y":448,"exts":{},"type":"LevelExit"},{"x":1664,"y":512,"exts":{},"type":"trawa"},{"x":1280,"y":448,"exts":{},"type":"skała"},{"x":1280,"y":384,"exts":{},"type":"trawa"},{"x":1344,"y":384,"exts":{},"type":"Platform"},{"x":1728,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1792,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1856,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1920,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1984,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2048,"y":384,"exts":{},"type":"Platform"},{"x":2432,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2496,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2560,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2624,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2688,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2752,"y":384,"exts":{},"type":"Platform"},{"x":3136,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":3200,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":3264,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":3328,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":3392,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":3456,"y":384,"exts":{},"type":"Platform"},{"x":3904,"y":448,"exts":{},"type":"skała"},{"x":3904,"y":384,"exts":{},"type":"trawa"},{"x":320,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":384,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":448,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":512,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":576,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":640,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":704,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":768,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":832,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":896,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":960,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":1152,"y":448,"exts":{},"type":"Heart"},{"x":4096,"y":448,"exts":{},"type":"Heart"},{"x":1280,"y":320,"exts":{},"type":"Checkpoint"},{"x":128,"y":512,"exts":{},"type":"robot"},{"x":384,"y":384,"exts":{},"type":"GreenCrystal"},{"x":448,"y":384,"exts":{},"type":"GreenCrystal"},{"x":512,"y":384,"exts":{},"type":"GreenCrystal"},{"x":576,"y":384,"exts":{},"type":"GreenCrystal"},{"x":640,"y":384,"exts":{},"type":"GreenCrystal"},{"x":704,"y":384,"exts":{},"type":"GreenCrystal"},{"x":768,"y":384,"exts":{},"type":"GreenCrystal"},{"x":832,"y":384,"exts":{},"type":"GreenCrystal"},{"x":960,"y":384,"exts":{},"type":"GreenCrystal"},{"x":896,"y":384,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1984,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1920,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1856,"y":320,"exts":{},"type":"GreenCrystal"},{"x":2496,"y":320,"exts":{},"type":"GreenCrystal"},{"x":2560,"y":320,"exts":{},"type":"GreenCrystal"},{"x":2624,"y":320,"exts":{},"type":"GreenCrystal"},{"x":2688,"y":320,"exts":{},"type":"GreenCrystal"},{"x":3200,"y":320,"exts":{},"type":"GreenCrystal"},{"x":3264,"y":320,"exts":{},"type":"GreenCrystal"},{"x":3328,"y":320,"exts":{},"type":"GreenCrystal"},{"x":3392,"y":320,"exts":{},"type":"GreenCrystal"},{"x":320,"y":512,"exts":{},"type":"lava2-top"},{"x":384,"y":512,"exts":{},"type":"lava2-top"},{"x":512,"y":512,"exts":{},"type":"lava2-top"},{"x":448,"y":512,"exts":{},"type":"lava2-top"},{"x":576,"y":512,"exts":{},"type":"lava2-top"},{"x":640,"y":512,"exts":{},"type":"lava2-top"},{"x":704,"y":512,"exts":{},"type":"lava2-top"},{"x":768,"y":512,"exts":{},"type":"lava2-top"},{"x":832,"y":512,"exts":{},"type":"lava2-top"},{"x":896,"y":512,"exts":{},"type":"lava2-top"},{"x":960,"y":512,"exts":{},"type":"lava2-top"},{"x":3328,"y":512,"exts":{},"type":"trawa"},{"x":1728,"y":512,"exts":{},"type":"trawa"},{"x":1792,"y":512,"exts":{},"type":"trawa"},{"x":1856,"y":512,"exts":{},"type":"trawa"},{"x":1920,"y":512,"exts":{},"type":"trawa"},{"x":2048,"y":512,"exts":{},"type":"trawa"},{"x":2048,"y":512,"exts":{},"type":"trawa"},{"x":1984,"y":512,"exts":{},"type":"trawa"},{"x":2112,"y":512,"exts":{},"type":"trawa"},{"x":2176,"y":512,"exts":{},"type":"trawa"},{"x":2240,"y":512,"exts":{},"type":"trawa"},{"x":2304,"y":512,"exts":{},"type":"trawa"},{"x":2368,"y":512,"exts":{},"type":"trawa"},{"x":1344,"y":448,"exts":{},"type":"kolce"},{"x":1408,"y":448,"exts":{},"type":"kolce"},{"x":1472,"y":448,"exts":{},"type":"kolce"},{"x":1536,"y":448,"exts":{},"type":"kolce"},{"x":1600,"y":448,"exts":{},"type":"kolce"},{"x":1664,"y":448,"exts":{},"type":"kolce"},{"x":1728,"y":448,"exts":{},"type":"kolce"},{"x":1792,"y":448,"exts":{},"type":"kolce"},{"x":1856,"y":448,"exts":{},"type":"kolce"},{"x":1920,"y":448,"exts":{},"type":"kolce"},{"x":1984,"y":448,"exts":{},"type":"kolce"},{"x":2048,"y":448,"exts":{},"type":"kolce"},{"x":2112,"y":448,"exts":{},"type":"kolce"},{"x":2176,"y":448,"exts":{},"type":"kolce"},{"x":2240,"y":448,"exts":{},"type":"kolce"},{"x":2304,"y":448,"exts":{},"type":"kolce"},{"x":2368,"y":448,"exts":{},"type":"kolce"},{"x":2432,"y":448,"exts":{},"type":"kolce"},{"x":2496,"y":448,"exts":{},"type":"kolce"},{"x":2560,"y":448,"exts":{},"type":"kolce"},{"x":2624,"y":448,"exts":{},"type":"kolce"},{"x":2688,"y":448,"exts":{},"type":"kolce"},{"x":2752,"y":448,"exts":{},"type":"kolce"},{"x":2816,"y":448,"exts":{},"type":"kolce"},{"x":2880,"y":448,"exts":{},"type":"kolce"},{"x":2944,"y":448,"exts":{},"type":"kolce"},{"x":3008,"y":448,"exts":{},"type":"kolce"},{"x":3072,"y":448,"exts":{},"type":"kolce"},{"x":3136,"y":448,"exts":{},"type":"kolce"},{"x":3200,"y":448,"exts":{},"type":"kolce"},{"x":3264,"y":448,"exts":{},"type":"kolce"},{"x":3328,"y":448,"exts":{},"type":"kolce"},{"x":3392,"y":448,"exts":{},"type":"kolce"},{"x":3456,"y":448,"exts":{},"type":"kolce"},{"x":3520,"y":448,"exts":{},"type":"kolce"},{"x":3584,"y":448,"exts":{},"type":"kolce"},{"x":3648,"y":448,"exts":{},"type":"kolce"},{"x":3712,"y":448,"exts":{},"type":"kolce"},{"x":3776,"y":448,"exts":{},"type":"kolce"},{"x":3840,"y":448,"exts":{},"type":"kolce"},{"x":4317,"y":489,"exts":{},"type":"GreenCrystal"},{"x":4288,"y":448,"exts":{},"type":"skrzynia"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom5';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom5'] = {
+    name: 'poziom5',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":0,"y":512,"exts":{},"type":"trawa"},{"x":64,"y":512,"exts":{},"type":"trawa"},{"x":128,"y":512,"exts":{},"type":"trawa"},{"x":192,"y":512,"exts":{},"type":"trawa"},{"x":256,"y":512,"exts":{},"type":"trawa"},{"x":320,"y":512,"exts":{},"type":"trawa"},{"x":384,"y":512,"exts":{},"type":"trawa"},{"x":448,"y":512,"exts":{},"type":"trawa"},{"x":512,"y":512,"exts":{},"type":"trawa"},{"x":576,"y":512,"exts":{},"type":"trawa"},{"x":640,"y":512,"exts":{},"type":"trawa"},{"x":704,"y":512,"exts":{},"type":"trawa"},{"x":768,"y":512,"exts":{},"type":"skała"},{"x":-64,"y":512,"exts":{},"type":"skała"},{"x":-64,"y":448,"exts":{},"type":"skała"},{"x":-64,"y":384,"exts":{},"type":"skała"},{"x":-64,"y":320,"exts":{},"type":"skała"},{"x":-64,"y":256,"exts":{},"type":"skała"},{"x":-64,"y":192,"exts":{},"type":"skała"},{"x":-64,"y":128,"exts":{},"type":"skała"},{"x":-64,"y":128,"exts":{},"type":"skała"},{"x":-64,"y":64,"exts":{},"type":"skała"},{"x":-64,"y":0,"exts":{},"type":"skała"},{"x":-64,"y":-64,"exts":{},"type":"skała"},{"x":-64,"y":-128,"exts":{},"type":"skała"},{"x":-64,"y":-192,"exts":{},"type":"skała"},{"x":-64,"y":-256,"exts":{},"type":"skała"},{"x":-64,"y":-320,"exts":{},"type":"skała"},{"x":-64,"y":-384,"exts":{},"type":"skała"},{"x":768,"y":448,"exts":{},"type":"skała"},{"x":768,"y":384,"exts":{},"type":"skała"},{"x":768,"y":320,"exts":{},"type":"skała"},{"x":768,"y":192,"exts":{},"type":"skała"},{"x":768,"y":128,"exts":{},"type":"skała"},{"x":768,"y":64,"exts":{},"type":"skała"},{"x":768,"y":0,"exts":{},"type":"trawa"},{"x":-64,"y":-448,"exts":{},"type":"trawa"},{"x":64,"y":512,"exts":{},"type":"robot"},{"x":832,"y":0,"exts":{},"type":"trawa"},{"x":896,"y":0,"exts":{},"type":"trawa"},{"x":960,"y":0,"exts":{},"type":"trawa"},{"x":1024,"y":0,"exts":{},"type":"trawa"},{"x":1088,"y":0,"exts":{},"type":"trawa"},{"x":1088,"y":64,"exts":{},"type":"skała"},{"x":1152,"y":64,"exts":{},"type":"trawa"},{"x":1216,"y":64,"exts":{},"type":"trawa"},{"x":1280,"y":64,"exts":{},"type":"trawa"},{"x":1344,"y":64,"exts":{},"type":"lava2-top"},{"x":1408,"y":64,"exts":{},"type":"lava2-top"},{"x":1472,"y":64,"exts":{},"type":"lava2-top"},{"x":1536,"y":64,"exts":{},"type":"lava2-top"},{"x":1600,"y":64,"exts":{},"type":"lava2-top"},{"x":1664,"y":64,"exts":{},"type":"lava2-top"},{"x":1728,"y":64,"exts":{},"type":"lava2-top"},{"x":1792,"y":64,"exts":{},"type":"trawa"},{"x":1856,"y":64,"exts":{},"type":"trawa"},{"x":1984,"y":64,"exts":{},"type":"trawa"},{"x":1920,"y":64,"exts":{},"type":"trawa"},{"x":2048,"y":64,"exts":{},"type":"trawa"},{"x":2112,"y":64,"exts":{},"type":"skała"},{"x":2112,"y":0,"exts":{},"type":"skała"},{"x":2112,"y":-64,"exts":{},"type":"skała"},{"x":2112,"y":-128,"exts":{},"type":"skała"},{"x":2112,"y":-192,"exts":{},"type":"skała"},{"x":2112,"y":-192,"exts":{},"type":"skała"},{"x":2112,"y":-256,"exts":{},"type":"trawa"},{"x":2048,"y":0,"exts":{},"type":"LevelExit"},{"x":1344,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":1408,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":1472,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":1600,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":1664,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":1728,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":1536,"y":0,"exts":{},"type":"pratforma"},{"x":512,"y":448,"exts":{},"type":"platforma_ukryta"},{"x":576,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":640,"y":320,"exts":{},"type":"platforma_ukryta"},{"x":704,"y":320,"exts":{},"type":"platforma_ukryta"},{"x":512,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":448,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":384,"y":256,"exts":{},"type":"platforma_ukryta"},{"x":320,"y":192,"exts":{},"type":"platforma_ukryta"},{"x":256,"y":128,"exts":{},"type":"platforma_ukryta"},{"x":192,"y":64,"exts":{},"type":"platforma_ukryta"},{"x":128,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":64,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":0,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":448,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":512,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":320,"y":-128,"exts":{},"type":"platforma_ukryta"},{"x":256,"y":-128,"exts":{},"type":"platforma_ukryta"},{"x":192,"y":-128,"exts":{},"type":"platforma_ukryta"},{"x":128,"y":-128,"exts":{},"type":"platforma_ukryta"},{"x":0,"y":-64,"exts":{},"type":"platforma_ukryta"},{"x":576,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":640,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":704,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":832,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":896,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":960,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1024,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1088,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1152,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1856,"y":0,"exts":{},"type":"GreenCrystal"},{"x":1920,"y":0,"exts":{},"type":"GreenCrystal"},{"x":1984,"y":0,"exts":{},"type":"GreenCrystal"},{"x":192,"y":448,"exts":{},"type":"GreenCrystal"},{"x":256,"y":448,"exts":{},"type":"GreenCrystal"},{"x":320,"y":448,"exts":{},"type":"GreenCrystal"},{"x":384,"y":448,"exts":{},"type":"GreenCrystal"},{"x":448,"y":448,"exts":{},"type":"GreenCrystal"},{"x":128,"y":-192,"exts":{},"type":"GreenCrystal"},{"x":192,"y":-192,"exts":{},"type":"GreenCrystal"},{"x":256,"y":-192,"exts":{},"type":"GreenCrystal"},{"x":320,"y":-192,"exts":{},"type":"GreenCrystal"},{"x":384,"y":-192,"exts":{},"type":"GreenCrystal"},{"x":448,"y":-192,"exts":{},"type":"GreenCrystal"},{"x":448,"y":-128,"exts":{},"type":"GreenCrystal"},{"x":448,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":512,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":576,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":640,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":704,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":768,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1856,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1920,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1984,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1216,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1280,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1216,"y":0,"exts":{},"type":"GreenCrystal"},{"x":1280,"y":0,"exts":{},"type":"GreenCrystal"},{"x":1344,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1600,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":-64,"exts":{},"type":"GreenCrystal"},{"x":735,"y":295,"exts":{},"type":"GreenCrystal"},{"x":704,"y":256,"exts":{},"type":"skrzynia"},{"x":768,"y":256,"exts":{},"type":"skała"},{"x":384,"y":0,"exts":{},"type":"platforma_ukryta"},{"x":320,"y":-64,"exts":{},"type":"platforma_ukryta"},{"x":320,"y":0,"exts":{},"type":"platforma_ukryta"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom6';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom6'] = {
+    name: 'poziom6',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":192,"y":384,"exts":{},"type":"trawa"},{"x":256,"y":384,"exts":{},"type":"trawa"},{"x":320,"y":384,"exts":{},"type":"trawa"},{"x":384,"y":384,"exts":{},"type":"trawa"},{"x":512,"y":384,"exts":{},"type":"trawa"},{"x":448,"y":384,"exts":{},"type":"trawa"},{"x":576,"y":384,"exts":{},"type":"trawa"},{"x":640,"y":384,"exts":{},"type":"trawa"},{"x":64,"y":384,"exts":{},"type":"trawa"},{"x":0,"y":320,"exts":{},"type":"skała"},{"x":0,"y":320,"exts":{},"type":"skała"},{"x":0,"y":256,"exts":{},"type":"skała"},{"x":0,"y":192,"exts":{},"type":"skała"},{"x":0,"y":192,"exts":{},"type":"skała"},{"x":576,"y":320,"exts":{},"type":"Boss1"},{"x":-64,"y":256,"exts":{},"type":"skała"},{"x":-64,"y":256,"exts":{},"type":"skała"},{"x":-192,"y":256,"exts":{},"type":"robot"},{"x":128,"y":384,"exts":{},"type":"trawa"},{"x":832,"y":320,"exts":{},"type":"trawa"},{"x":896,"y":256,"exts":{},"type":"trawa"},{"x":896,"y":192,"exts":{},"type":"LevelExit"},{"x":704,"y":384,"exts":{},"type":"skała"},{"x":704,"y":320,"exts":{},"type":"trawa"},{"x":768,"y":320,"exts":{},"type":"trawa"},{"x":0,"y":384,"exts":{},"type":"skała"},{"x":0,"y":128,"exts":{},"type":"trawa"},{"x":-64,"y":192,"exts":{},"type":"trawa"},{"x":-128,"y":256,"exts":{},"type":"trawa"},{"x":-192,"y":256,"exts":{},"type":"trawa"},{"x":-256,"y":256,"exts":{},"type":"trawa"},{"x":-320,"y":256,"exts":{},"type":"skała"},{"x":-320,"y":192,"exts":{},"type":"skała"},{"x":-320,"y":128,"exts":{},"type":"skała"},{"x":-320,"y":64,"exts":{},"type":"trawa"},{"x":896,"y":320,"exts":{},"type":"skała"},{"x":960,"y":256,"exts":{},"type":"skała"},{"x":960,"y":192,"exts":{},"type":"skała"},{"x":960,"y":192,"exts":{},"type":"skała"},{"x":960,"y":128,"exts":{},"type":"skała"},{"x":960,"y":64,"exts":{},"type":"skała"},{"x":960,"y":0,"exts":{},"type":"skała"},{"x":960,"y":-64,"exts":{},"type":"trawa"},{"x":867,"y":297,"exts":{},"type":"GreenCrystal"},{"x":832,"y":256,"exts":{},"type":"skrzynia"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom7';
+inGameRoomStart(this);
+for(var a of ct.types.list.LevelExit){
+    a.visible = false;
+}
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom7'] = {
+    name: 'poziom7',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":128,"y":448,"exts":{},"type":"snieg"},{"x":64,"y":448,"exts":{},"type":"lod"},{"x":64,"y":384,"exts":{},"type":"lod"},{"x":64,"y":384,"exts":{},"type":"lod"},{"x":64,"y":320,"exts":{},"type":"lod"},{"x":64,"y":256,"exts":{},"type":"lod"},{"x":64,"y":256,"exts":{},"type":"lod"},{"x":64,"y":192,"exts":{},"type":"lod"},{"x":64,"y":128,"exts":{},"type":"snieg"},{"x":192,"y":448,"exts":{},"type":"snieg"},{"x":256,"y":448,"exts":{},"type":"snieg"},{"x":320,"y":448,"exts":{},"type":"snieg"},{"x":384,"y":448,"exts":{},"type":"snieg"},{"x":448,"y":448,"exts":{},"type":"WaterTop"},{"x":512,"y":448,"exts":{},"type":"WaterTop"},{"x":640,"y":448,"exts":{},"type":"WaterTop"},{"x":704,"y":448,"exts":{},"type":"WaterTop"},{"x":768,"y":448,"exts":{},"type":"WaterTop"},{"x":832,"y":448,"exts":{},"type":"WaterTop"},{"x":896,"y":448,"exts":{},"type":"WaterTop"},{"x":960,"y":448,"exts":{},"type":"WaterTop"},{"x":1024,"y":448,"exts":{},"type":"snieg"},{"x":1088,"y":448,"exts":{},"type":"snieg"},{"x":640,"y":448,"exts":{},"type":"WaterTop"},{"x":576,"y":448,"exts":{},"type":"WaterTop"},{"x":448,"y":384,"exts":{},"type":"snieg-platforma"},{"x":512,"y":320,"exts":{},"type":"snieg-platforma"},{"x":576,"y":256,"exts":{},"type":"snieg-platforma"},{"x":704,"y":256,"exts":{},"type":"snieg-platforma"},{"x":832,"y":256,"exts":{},"type":"snieg-platforma"},{"x":896,"y":320,"exts":{},"type":"snieg-platforma"},{"x":960,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1152,"y":448,"exts":{},"type":"snieg"},{"x":1216,"y":448,"exts":{},"type":"snieg"},{"x":1216,"y":512,"exts":{},"type":"lod"},{"x":1344,"y":512,"exts":{},"type":"snieg"},{"x":1280,"y":512,"exts":{},"type":"snieg"},{"x":1408,"y":512,"exts":{},"type":"snieg"},{"x":1472,"y":512,"exts":{},"type":"snieg"},{"x":1600,"y":512,"exts":{},"type":"snieg"},{"x":1536,"y":512,"exts":{},"type":"snieg"},{"x":1664,"y":512,"exts":{},"type":"snieg"},{"x":1728,"y":512,"exts":{},"type":"snieg"},{"x":1792,"y":512,"exts":{},"type":"snieg"},{"x":1856,"y":512,"exts":{},"type":"snieg"},{"x":1920,"y":512,"exts":{},"type":"snieg"},{"x":1984,"y":512,"exts":{},"type":"snieg"},{"x":2048,"y":512,"exts":{},"type":"snieg"},{"x":2112,"y":512,"exts":{},"type":"snieg"},{"x":2176,"y":512,"exts":{},"type":"lod"},{"x":2176,"y":448,"exts":{},"type":"snieg"},{"x":2240,"y":448,"exts":{},"type":"snieg"},{"x":2304,"y":448,"exts":{},"type":"snieg"},{"x":2368,"y":448,"exts":{},"type":"snieg"},{"x":2432,"y":448,"exts":{},"type":"snieg"},{"x":2560,"y":448,"exts":{},"type":"snieg"},{"x":2496,"y":448,"exts":{},"type":"snieg"},{"x":2624,"y":448,"exts":{},"type":"lod"},{"x":2624,"y":384,"exts":{},"type":"lod"},{"x":2624,"y":320,"exts":{},"type":"lod"},{"x":2624,"y":256,"exts":{},"type":"lod"},{"x":2624,"y":192,"exts":{},"type":"lod"},{"x":2624,"y":128,"exts":{},"type":"lod"},{"x":2624,"y":64,"exts":{},"type":"snieg"},{"x":1280,"y":448,"exts":{},"type":"kolc"},{"x":1344,"y":448,"exts":{},"type":"kolc"},{"x":1408,"y":448,"exts":{},"type":"kolc"},{"x":1472,"y":448,"exts":{},"type":"kolc"},{"x":1536,"y":448,"exts":{},"type":"kolc"},{"x":1600,"y":448,"exts":{},"type":"kolc"},{"x":1664,"y":448,"exts":{},"type":"kolc"},{"x":1728,"y":448,"exts":{},"type":"kolc"},{"x":1792,"y":448,"exts":{},"type":"kolc"},{"x":1856,"y":448,"exts":{},"type":"kolc"},{"x":1920,"y":448,"exts":{},"type":"kolc"},{"x":1984,"y":448,"exts":{},"type":"kolc"},{"x":2048,"y":448,"exts":{},"type":"kolc"},{"x":2112,"y":448,"exts":{},"type":"kolc"},{"x":1280,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1344,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1408,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1472,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1536,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1600,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1792,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1856,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1920,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1984,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2048,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":2112,"y":384,"exts":{},"type":"platforma_ukryta"},{"x":1664,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1728,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1664,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1728,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1728,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1664,"y":256,"exts":{},"type":"GreenCrystal"},{"x":384,"y":320,"exts":{},"type":"GreenCrystal"},{"x":384,"y":384,"exts":{},"type":"GreenCrystal"},{"x":448,"y":320,"exts":{},"type":"GreenCrystal"},{"x":448,"y":256,"exts":{},"type":"GreenCrystal"},{"x":512,"y":256,"exts":{},"type":"GreenCrystal"},{"x":512,"y":192,"exts":{},"type":"GreenCrystal"},{"x":576,"y":192,"exts":{},"type":"GreenCrystal"},{"x":640,"y":192,"exts":{},"type":"GreenCrystal"},{"x":704,"y":192,"exts":{},"type":"GreenCrystal"},{"x":768,"y":192,"exts":{},"type":"GreenCrystal"},{"x":832,"y":192,"exts":{},"type":"GreenCrystal"},{"x":896,"y":192,"exts":{},"type":"GreenCrystal"},{"x":960,"y":192,"exts":{},"type":"GreenCrystal"},{"x":960,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1024,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1024,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1088,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1088,"y":384,"exts":{},"type":"GreenCrystal"},{"x":1152,"y":384,"exts":{},"type":"GreenCrystal"},{"x":320,"y":384,"exts":{},"type":"GreenCrystal"},{"x":2304,"y":384,"exts":{},"type":"GreenCrystal"},{"x":2368,"y":384,"exts":{},"type":"GreenCrystal"},{"x":2432,"y":384,"exts":{},"type":"GreenCrystal"},{"x":2240,"y":384,"exts":{},"type":"GreenCrystal"},{"x":2496,"y":384,"exts":{},"type":"GreenCrystal"},{"x":2560,"y":384,"exts":{},"type":"LevelExit"},{"x":192,"y":448,"exts":{},"type":"robot"},{"x":1245,"y":428,"exts":{},"type":"GreenCrystal"},{"x":1216,"y":384,"exts":{},"type":"skrzynia_lod"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom8';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom8'] = {
+    name: 'poziom8',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":64,"y":448,"exts":{},"type":"snieg"},{"x":128,"y":448,"exts":{},"type":"snieg"},{"x":128,"y":448,"exts":{},"type":"robot"},{"x":0,"y":448,"exts":{},"type":"lod"},{"x":0,"y":448,"exts":{},"type":"lod"},{"x":0,"y":384,"exts":{},"type":"lod"},{"x":0,"y":320,"exts":{},"type":"lod"},{"x":0,"y":320,"exts":{},"type":"lod"},{"x":0,"y":320,"exts":{},"type":"lod"},{"x":0,"y":256,"exts":{},"type":"lod"},{"x":0,"y":192,"exts":{},"type":"snieg"},{"x":192,"y":448,"exts":{},"type":"snieg"},{"x":256,"y":448,"exts":{},"type":"snieg"},{"x":320,"y":448,"exts":{},"type":"snieg"},{"x":512,"y":320,"exts":{},"type":"snieg"},{"x":576,"y":256,"exts":{},"type":"snieg"},{"x":704,"y":256,"exts":{},"type":"snieg"},{"x":704,"y":256,"exts":{},"type":"snieg"},{"x":640,"y":256,"exts":{},"type":"snieg"},{"x":448,"y":320,"exts":{},"type":"snieg"},{"x":384,"y":384,"exts":{},"type":"snieg"},{"x":768,"y":256,"exts":{},"type":"snieg"},{"x":768,"y":256,"exts":{},"type":"snieg"},{"x":384,"y":448,"exts":{},"type":"WaterTop"},{"x":448,"y":448,"exts":{},"type":"WaterTop"},{"x":512,"y":448,"exts":{},"type":"WaterTop"},{"x":576,"y":448,"exts":{},"type":"WaterTop"},{"x":640,"y":448,"exts":{},"type":"WaterTop"},{"x":704,"y":448,"exts":{},"type":"WaterTop"},{"x":768,"y":448,"exts":{},"type":"WaterTop"},{"x":1024,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1344,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":832,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":896,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":960,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1088,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1152,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1216,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1280,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1408,"y":256,"exts":{},"type":"snieg"},{"x":1472,"y":256,"exts":{},"type":"snieg"},{"x":1536,"y":256,"exts":{},"type":"snieg"},{"x":1600,"y":256,"exts":{},"type":"snieg"},{"x":1664,"y":320,"exts":{},"type":"snieg"},{"x":1728,"y":320,"exts":{},"type":"snieg"},{"x":1792,"y":384,"exts":{},"type":"snieg"},{"x":1856,"y":448,"exts":{},"type":"snieg"},{"x":1920,"y":448,"exts":{},"type":"snieg"},{"x":1984,"y":448,"exts":{},"type":"snieg"},{"x":832,"y":448,"exts":{},"type":"WaterTop"},{"x":960,"y":448,"exts":{},"type":"WaterTop"},{"x":896,"y":448,"exts":{},"type":"WaterTop"},{"x":1024,"y":448,"exts":{},"type":"WaterTop"},{"x":1088,"y":448,"exts":{},"type":"WaterTop"},{"x":1216,"y":448,"exts":{},"type":"WaterTop"},{"x":1152,"y":448,"exts":{},"type":"WaterTop"},{"x":1280,"y":448,"exts":{},"type":"WaterTop"},{"x":1344,"y":448,"exts":{},"type":"WaterTop"},{"x":1408,"y":448,"exts":{},"type":"WaterTop"},{"x":1472,"y":448,"exts":{},"type":"WaterTop"},{"x":1536,"y":448,"exts":{},"type":"WaterTop"},{"x":1600,"y":448,"exts":{},"type":"WaterTop"},{"x":1728,"y":448,"exts":{},"type":"WaterTop"},{"x":1792,"y":448,"exts":{},"type":"WaterTop"},{"x":1664,"y":448,"exts":{},"type":"WaterTop"},{"x":2048,"y":448,"exts":{},"type":"lod"},{"x":2048,"y":384,"exts":{},"type":"lod"},{"x":2048,"y":320,"exts":{},"type":"lod"},{"x":2048,"y":256,"exts":{},"type":"lod"},{"x":2048,"y":192,"exts":{},"type":"lod"},{"x":2048,"y":128,"exts":{},"type":"snieg"},{"x":1984,"y":384,"exts":{},"type":"LevelExit"},{"x":1920,"y":384,"exts":{},"type":"GreenCrystal"},{"x":1856,"y":320,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1728,"y":256,"exts":{},"type":"GreenCrystal"},{"x":1664,"y":192,"exts":{},"type":"GreenCrystal"},{"x":1600,"y":192,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":192,"exts":{},"type":"GreenCrystal"},{"x":1472,"y":192,"exts":{},"type":"GreenCrystal"},{"x":768,"y":192,"exts":{},"type":"GreenCrystal"},{"x":704,"y":192,"exts":{},"type":"GreenCrystal"},{"x":640,"y":192,"exts":{},"type":"GreenCrystal"},{"x":512,"y":256,"exts":{},"type":"GreenCrystal"},{"x":448,"y":256,"exts":{},"type":"GreenCrystal"},{"x":384,"y":320,"exts":{},"type":"GreenCrystal"},{"x":320,"y":384,"exts":{},"type":"GreenCrystal"},{"x":256,"y":384,"exts":{},"type":"GreenCrystal"},{"x":576,"y":192,"exts":{},"type":"GreenCrystal"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom9';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom9'] = {
+    name: 'poziom9',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":64,"y":448,"exts":{},"type":"snieg"},{"x":128,"y":448,"exts":{},"type":"snieg"},{"x":192,"y":448,"exts":{},"type":"snieg"},{"x":256,"y":448,"exts":{},"type":"snieg"},{"x":0,"y":448,"exts":{},"type":"lod"},{"x":0,"y":384,"exts":{},"type":"lod"},{"x":0,"y":320,"exts":{},"type":"lod"},{"x":0,"y":320,"exts":{},"type":"lod"},{"x":0,"y":256,"exts":{},"type":"lod"},{"x":0,"y":192,"exts":{},"type":"snieg"},{"x":128,"y":448,"exts":{},"type":"robot"},{"x":320,"y":448,"exts":{},"type":"WaterTop"},{"x":384,"y":448,"exts":{},"type":"WaterTop"},{"x":448,"y":448,"exts":{},"type":"WaterTop"},{"x":512,"y":448,"exts":{},"type":"WaterTop"},{"x":576,"y":448,"exts":{},"type":"WaterTop"},{"x":640,"y":448,"exts":{},"type":"WaterTop"},{"x":704,"y":448,"exts":{},"type":"WaterTop"},{"x":768,"y":448,"exts":{},"type":"WaterTop"},{"x":832,"y":448,"exts":{},"type":"WaterTop"},{"x":896,"y":448,"exts":{},"type":"WaterTop"},{"x":960,"y":448,"exts":{},"type":"WaterTop"},{"x":1024,"y":448,"exts":{},"type":"WaterTop"},{"x":1088,"y":448,"exts":{},"type":"WaterTop"},{"x":1152,"y":448,"exts":{},"type":"WaterTop"},{"x":1216,"y":448,"exts":{},"type":"WaterTop"},{"x":1280,"y":448,"exts":{},"type":"WaterTop"},{"x":1344,"y":448,"exts":{},"type":"WaterTop"},{"x":1408,"y":448,"exts":{},"type":"WaterTop"},{"x":1472,"y":448,"exts":{},"type":"WaterTop"},{"x":1600,"y":448,"exts":{},"type":"WaterTop"},{"x":1536,"y":448,"exts":{},"type":"WaterTop"},{"x":1664,"y":448,"exts":{},"type":"WaterTop"},{"x":1728,"y":448,"exts":{},"type":"WaterTop"},{"x":1792,"y":448,"exts":{},"type":"WaterTop"},{"x":1856,"y":448,"exts":{},"type":"WaterTop"},{"x":1920,"y":448,"exts":{},"type":"WaterTop"},{"x":1984,"y":448,"exts":{},"type":"snieg"},{"x":2048,"y":448,"exts":{},"type":"snieg"},{"x":320,"y":384,"exts":{},"type":"snieg-platforma"},{"x":384,"y":320,"exts":{},"type":"snieg-platforma"},{"x":512,"y":320,"exts":{},"type":"snieg-platforma"},{"x":640,"y":256,"exts":{},"type":"snieg-platforma"},{"x":768,"y":192,"exts":{},"type":"snieg-platforma"},{"x":960,"y":256,"exts":{},"type":"snieg-platforma"},{"x":896,"y":256,"exts":{},"type":"snieg-platforma"},{"x":1088,"y":320,"exts":{},"type":"snieg-platforma"},{"x":1152,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1216,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1280,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1344,"y":384,"exts":{},"type":"snieg-platforma"},{"x":1408,"y":320,"exts":{},"type":"snieg-platforma"},{"x":2112,"y":448,"exts":{},"type":"snieg"},{"x":2176,"y":448,"exts":{},"type":"lod"},{"x":2176,"y":448,"exts":{},"type":"lod"},{"x":2176,"y":448,"exts":{},"type":"lod"},{"x":2176,"y":384,"exts":{},"type":"lod"},{"x":2176,"y":320,"exts":{},"type":"lod"},{"x":2176,"y":256,"exts":{},"type":"snieg"},{"x":2112,"y":384,"exts":{},"type":"LevelExit"},{"x":1472,"y":256,"exts":{},"type":"snieg-platforma"},{"x":1536,"y":192,"exts":{},"type":"snieg-platforma"},{"x":1600,"y":128,"exts":{},"type":"snieg-platforma"},{"x":1664,"y":64,"exts":{},"type":"snieg-platforma"},{"x":1728,"y":0,"exts":{},"type":"snieg-platforma"},{"x":1792,"y":-64,"exts":{},"type":"snieg-platforma"},{"x":1856,"y":-128,"exts":{},"type":"snieg-platforma"},{"x":2016,"y":424,"exts":{},"type":"GreenCrystal"},{"x":2015,"y":367,"exts":{},"type":"GreenCrystal"},{"x":2016,"y":300,"exts":{},"type":"GreenCrystal"},{"x":2017,"y":238,"exts":{},"type":"GreenCrystal"},{"x":2014,"y":168,"exts":{},"type":"GreenCrystal"},{"x":2015,"y":109,"exts":{},"type":"GreenCrystal"},{"x":2014,"y":44,"exts":{},"type":"GreenCrystal"},{"x":2014,"y":-21,"exts":{},"type":"GreenCrystal"},{"x":2016,"y":-85,"exts":{},"type":"GreenCrystal"},{"x":1984,"y":-64,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":0,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":-128,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":128,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":64,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":192,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":320,"exts":{},"type":"skrzynia_lod"},{"x":1984,"y":384,"exts":{},"type":"skrzynia_lod"},{"x":1920,"y":-128,"exts":{},"type":"snieg-platforma"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom10';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom10'] = {
+    name: 'poziom10',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":0,"y":448,"exts":{},"type":"Water"},{"x":0,"y":384,"exts":{},"type":"Water"},{"x":0,"y":320,"exts":{},"type":"Water"},{"x":0,"y":256,"exts":{},"type":"Water"},{"x":0,"y":192,"exts":{},"type":"Water"},{"x":0,"y":128,"exts":{},"type":"Water"},{"x":0,"y":512,"exts":{},"type":"Water"},{"x":0,"y":64,"exts":{},"type":"WaterTop"},{"x":0,"y":576,"exts":{},"type":"Water"},{"x":0,"y":640,"exts":{},"type":"Water"},{"x":0,"y":704,"exts":{},"type":"Water"},{"x":0,"y":768,"exts":{},"type":"Water"},{"x":64,"y":448,"exts":{},"type":"lod"},{"x":64,"y":384,"exts":{},"type":"lod"},{"x":64,"y":320,"exts":{},"type":"lod"},{"x":64,"y":256,"exts":{},"type":"lod"},{"x":64,"y":128,"exts":{},"type":"Water"},{"x":64,"y":512,"exts":{},"type":"Water"},{"x":64,"y":512,"exts":{},"type":"Water"},{"x":64,"y":192,"exts":{},"type":"lod"},{"x":64,"y":64,"exts":{},"type":"WaterTop"},{"x":64,"y":576,"exts":{},"type":"Water"},{"x":64,"y":640,"exts":{},"type":"Water"},{"x":64,"y":704,"exts":{},"type":"Water"},{"x":64,"y":768,"exts":{},"type":"Water"},{"x":128,"y":128,"exts":{},"type":"Water"},{"x":128,"y":512,"exts":{},"type":"Water"},{"x":128,"y":192,"exts":{},"type":"lod"},{"x":128,"y":448,"exts":{},"type":"lod"},{"x":128,"y":64,"exts":{},"type":"WaterTop"},{"x":128,"y":576,"exts":{},"type":"Water"},{"x":128,"y":576,"exts":{},"type":"Water"},{"x":128,"y":640,"exts":{},"type":"Water"},{"x":128,"y":704,"exts":{},"type":"Water"},{"x":128,"y":768,"exts":{},"type":"Water"},{"x":192,"y":128,"exts":{},"type":"Water"},{"x":192,"y":512,"exts":{},"type":"Water"},{"x":192,"y":512,"exts":{},"type":"Water"},{"x":192,"y":192,"exts":{},"type":"lod"},{"x":192,"y":448,"exts":{},"type":"lod"},{"x":192,"y":64,"exts":{},"type":"WaterTop"},{"x":192,"y":576,"exts":{},"type":"Water"},{"x":192,"y":640,"exts":{},"type":"Water"},{"x":192,"y":704,"exts":{},"type":"Water"},{"x":192,"y":768,"exts":{},"type":"Water"},{"x":256,"y":128,"exts":{},"type":"Water"},{"x":256,"y":512,"exts":{},"type":"Water"},{"x":256,"y":192,"exts":{},"type":"lod"},{"x":256,"y":448,"exts":{},"type":"lod"},{"x":256,"y":64,"exts":{},"type":"WaterTop"},{"x":256,"y":576,"exts":{},"type":"Water"},{"x":256,"y":640,"exts":{},"type":"Water"},{"x":256,"y":704,"exts":{},"type":"Water"},{"x":256,"y":768,"exts":{},"type":"Water"},{"x":320,"y":128,"exts":{},"type":"Water"},{"x":320,"y":512,"exts":{},"type":"Water"},{"x":320,"y":192,"exts":{},"type":"lod"},{"x":320,"y":448,"exts":{},"type":"lod"},{"x":320,"y":64,"exts":{},"type":"WaterTop"},{"x":320,"y":576,"exts":{},"type":"Water"},{"x":320,"y":576,"exts":{},"type":"Water"},{"x":320,"y":640,"exts":{},"type":"Water"},{"x":320,"y":704,"exts":{},"type":"Water"},{"x":320,"y":768,"exts":{},"type":"Water"},{"x":384,"y":128,"exts":{},"type":"Water"},{"x":384,"y":512,"exts":{},"type":"Water"},{"x":384,"y":192,"exts":{},"type":"lod"},{"x":384,"y":448,"exts":{},"type":"lod"},{"x":384,"y":64,"exts":{},"type":"WaterTop"},{"x":384,"y":576,"exts":{},"type":"Water"},{"x":384,"y":576,"exts":{},"type":"Water"},{"x":384,"y":640,"exts":{},"type":"Water"},{"x":384,"y":704,"exts":{},"type":"Water"},{"x":384,"y":768,"exts":{},"type":"Water"},{"x":448,"y":448,"exts":{},"type":"lod"},{"x":448,"y":256,"exts":{},"type":"lod"},{"x":448,"y":128,"exts":{},"type":"Water"},{"x":448,"y":512,"exts":{},"type":"Water"},{"x":448,"y":512,"exts":{},"type":"Water"},{"x":448,"y":192,"exts":{},"type":"lod"},{"x":448,"y":64,"exts":{},"type":"WaterTop"},{"x":448,"y":576,"exts":{},"type":"Water"},{"x":448,"y":640,"exts":{},"type":"Water"},{"x":448,"y":704,"exts":{},"type":"Water"},{"x":448,"y":768,"exts":{},"type":"Water"},{"x":512,"y":128,"exts":{},"type":"Water"},{"x":512,"y":192,"exts":{},"type":"Water"},{"x":512,"y":512,"exts":{},"type":"Water"},{"x":512,"y":64,"exts":{},"type":"WaterTop"},{"x":512,"y":448,"exts":{},"type":"lod"},{"x":512,"y":512,"exts":{},"type":"lod"},{"x":512,"y":576,"exts":{},"type":"lod"},{"x":512,"y":640,"exts":{},"type":"lod"},{"x":512,"y":768,"exts":{},"type":"Water"},{"x":576,"y":704,"exts":{},"type":"lod"},{"x":576,"y":768,"exts":{},"type":"Water"},{"x":576,"y":192,"exts":{},"type":"Water"},{"x":576,"y":128,"exts":{},"type":"Water"},{"x":640,"y":704,"exts":{},"type":"lod"},{"x":640,"y":768,"exts":{},"type":"Water"},{"x":640,"y":128,"exts":{},"type":"Water"},{"x":640,"y":192,"exts":{},"type":"Water"},{"x":704,"y":704,"exts":{},"type":"lod"},{"x":704,"y":768,"exts":{},"type":"Water"},{"x":704,"y":192,"exts":{},"type":"Water"},{"x":704,"y":128,"exts":{},"type":"Water"},{"x":768,"y":704,"exts":{},"type":"lod"},{"x":768,"y":448,"exts":{},"type":"lod"},{"x":768,"y":768,"exts":{},"type":"Water"},{"x":768,"y":128,"exts":{},"type":"Water"},{"x":768,"y":192,"exts":{},"type":"Water"},{"x":768,"y":256,"exts":{},"type":"Water"},{"x":768,"y":320,"exts":{},"type":"Water"},{"x":832,"y":704,"exts":{},"type":"lod"},{"x":832,"y":448,"exts":{},"type":"lod"},{"x":832,"y":768,"exts":{},"type":"Water"},{"x":832,"y":256,"exts":{},"type":"Water"},{"x":832,"y":384,"exts":{},"type":"Water"},{"x":832,"y":320,"exts":{},"type":"Water"},{"x":832,"y":192,"exts":{},"type":"Water"},{"x":832,"y":128,"exts":{},"type":"Water"},{"x":896,"y":704,"exts":{},"type":"WaterTop"},{"x":896,"y":640,"exts":{},"type":"snieg-platforma"},{"x":896,"y":448,"exts":{},"type":"lod"},{"x":896,"y":768,"exts":{},"type":"Water"},{"x":896,"y":128,"exts":{},"type":"Water"},{"x":960,"y":704,"exts":{},"type":"WaterTop"},{"x":960,"y":640,"exts":{},"type":"snieg-platforma"},{"x":960,"y":448,"exts":{},"type":"lod"},{"x":960,"y":768,"exts":{},"type":"Water"},{"x":960,"y":128,"exts":{},"type":"Water"},{"x":960,"y":256,"exts":{},"type":"Water"},{"x":1024,"y":704,"exts":{},"type":"WaterTop"},{"x":1024,"y":640,"exts":{},"type":"snieg-platforma"},{"x":1024,"y":448,"exts":{},"type":"lod"},{"x":1024,"y":768,"exts":{},"type":"Water"},{"x":1024,"y":128,"exts":{},"type":"Water"},{"x":1024,"y":192,"exts":{},"type":"Water"},{"x":1088,"y":704,"exts":{},"type":"WaterTop"},{"x":1088,"y":640,"exts":{},"type":"snieg-platforma"},{"x":1088,"y":448,"exts":{},"type":"lod"},{"x":1088,"y":768,"exts":{},"type":"Water"},{"x":1088,"y":128,"exts":{},"type":"Water"},{"x":1152,"y":704,"exts":{},"type":"WaterTop"},{"x":1152,"y":640,"exts":{},"type":"snieg-platforma"},{"x":1152,"y":448,"exts":{},"type":"lod"},{"x":1152,"y":768,"exts":{},"type":"Water"},{"x":1152,"y":128,"exts":{},"type":"Water"},{"x":1152,"y":320,"exts":{},"type":"Water"},{"x":1216,"y":704,"exts":{},"type":"WaterTop"},{"x":1216,"y":640,"exts":{},"type":"snieg-platforma"},{"x":1216,"y":448,"exts":{},"type":"lod"},{"x":1216,"y":768,"exts":{},"type":"Water"},{"x":1280,"y":704,"exts":{},"type":"WaterTop"},{"x":1280,"y":640,"exts":{},"type":"snieg-platforma"},{"x":1280,"y":448,"exts":{},"type":"lod"},{"x":1280,"y":768,"exts":{},"type":"Water"},{"x":1344,"y":448,"exts":{},"type":"lod"},{"x":1344,"y":704,"exts":{},"type":"lod"},{"x":1344,"y":768,"exts":{},"type":"Water"},{"x":1408,"y":448,"exts":{},"type":"lod"},{"x":1408,"y":704,"exts":{},"type":"lod"},{"x":1472,"y":704,"exts":{},"type":"lod"},{"x":1472,"y":448,"exts":{},"type":"lod"},{"x":1472,"y":512,"exts":{},"type":"lod"},{"x":1536,"y":512,"exts":{},"type":"lod"},{"x":1536,"y":704,"exts":{},"type":"lod"},{"x":1600,"y":704,"exts":{},"type":"kolc"},{"x":1600,"y":512,"exts":{},"type":"lod"},{"x":1664,"y":704,"exts":{},"type":"lod"},{"x":1664,"y":512,"exts":{},"type":"lod"},{"x":1664,"y":448,"exts":{},"type":"lod"},{"x":1728,"y":704,"exts":{},"type":"lod"},{"x":1728,"y":448,"exts":{},"type":"lod"},{"x":1792,"y":704,"exts":{},"type":"lod"},{"x":1792,"y":448,"exts":{},"type":"lod"},{"x":1792,"y":448,"exts":{},"type":"lod"},{"x":1856,"y":704,"exts":{},"type":"lod"},{"x":1856,"y":448,"exts":{},"type":"lod"},{"x":1856,"y":640,"exts":{},"type":"LevelExit"},{"x":1920,"y":704,"exts":{},"type":"lod"},{"x":1920,"y":640,"exts":{},"type":"lod"},{"x":1920,"y":576,"exts":{},"type":"lod"},{"x":1920,"y":512,"exts":{},"type":"lod"},{"x":1920,"y":448,"exts":{},"type":"lod"},{"x":1920,"y":448,"exts":{},"type":"lod"},{"x":1024,"y":320,"exts":{},"type":"Water"},{"x":960,"y":320,"exts":{},"type":"Water"},{"x":960,"y":192,"exts":{},"type":"Water"},{"x":960,"y":192,"exts":{},"type":"Water"},{"x":896,"y":256,"exts":{},"type":"Water"},{"x":896,"y":192,"exts":{},"type":"Water"},{"x":896,"y":384,"exts":{},"type":"Water"},{"x":896,"y":320,"exts":{},"type":"Water"},{"x":960,"y":384,"exts":{},"type":"Water"},{"x":1024,"y":384,"exts":{},"type":"Water"},{"x":1088,"y":384,"exts":{},"type":"Water"},{"x":1152,"y":384,"exts":{},"type":"Water"},{"x":1088,"y":320,"exts":{},"type":"Water"},{"x":1024,"y":256,"exts":{},"type":"Water"},{"x":1088,"y":256,"exts":{},"type":"Water"},{"x":1088,"y":256,"exts":{},"type":"Water"},{"x":1152,"y":256,"exts":{},"type":"Water"},{"x":1088,"y":192,"exts":{},"type":"Water"},{"x":1152,"y":192,"exts":{},"type":"Water"},{"x":1216,"y":128,"exts":{},"type":"Water"},{"x":1216,"y":192,"exts":{},"type":"Water"},{"x":1216,"y":256,"exts":{},"type":"Water"},{"x":1216,"y":320,"exts":{},"type":"Water"},{"x":1216,"y":384,"exts":{},"type":"Water"},{"x":1280,"y":128,"exts":{},"type":"Water"},{"x":1280,"y":192,"exts":{},"type":"Water"},{"x":1280,"y":256,"exts":{},"type":"Water"},{"x":1280,"y":320,"exts":{},"type":"Water"},{"x":1280,"y":384,"exts":{},"type":"Water"},{"x":1344,"y":128,"exts":{},"type":"Water"},{"x":1344,"y":192,"exts":{},"type":"Water"},{"x":1344,"y":256,"exts":{},"type":"Water"},{"x":1408,"y":320,"exts":{},"type":"Water"},{"x":1344,"y":320,"exts":{},"type":"Water"},{"x":1344,"y":384,"exts":{},"type":"Water"},{"x":1408,"y":384,"exts":{},"type":"Water"},{"x":1408,"y":256,"exts":{},"type":"Water"},{"x":1408,"y":192,"exts":{},"type":"Water"},{"x":1408,"y":128,"exts":{},"type":"Water"},{"x":1472,"y":128,"exts":{},"type":"Water"},{"x":1472,"y":192,"exts":{},"type":"Water"},{"x":1472,"y":256,"exts":{},"type":"Water"},{"x":1472,"y":320,"exts":{},"type":"Water"},{"x":1472,"y":384,"exts":{},"type":"Water"},{"x":1536,"y":448,"exts":{},"type":"Water"},{"x":1600,"y":448,"exts":{},"type":"Water"},{"x":1664,"y":384,"exts":{},"type":"Water"},{"x":1600,"y":384,"exts":{},"type":"Water"},{"x":1536,"y":384,"exts":{},"type":"Water"},{"x":1664,"y":320,"exts":{},"type":"Water"},{"x":1664,"y":256,"exts":{},"type":"Water"},{"x":1664,"y":192,"exts":{},"type":"Water"},{"x":1664,"y":192,"exts":{},"type":"Water"},{"x":1664,"y":192,"exts":{},"type":"Water"},{"x":1664,"y":192,"exts":{},"type":"Water"},{"x":1664,"y":128,"exts":{},"type":"Water"},{"x":1536,"y":320,"exts":{},"type":"Water"},{"x":1600,"y":320,"exts":{},"type":"Water"},{"x":1600,"y":256,"exts":{},"type":"Water"},{"x":1600,"y":256,"exts":{},"type":"Water"},{"x":1600,"y":256,"exts":{},"type":"Water"},{"x":1536,"y":256,"exts":{},"type":"Water"},{"x":1600,"y":256,"exts":{},"type":"Water"},{"x":1600,"y":256,"exts":{},"type":"Water"},{"x":1600,"y":192,"exts":{},"type":"Water"},{"x":1536,"y":192,"exts":{},"type":"Water"},{"x":1536,"y":128,"exts":{},"type":"Water"},{"x":1600,"y":128,"exts":{},"type":"Water"},{"x":1408,"y":768,"exts":{},"type":"Water"},{"x":1472,"y":768,"exts":{},"type":"Water"},{"x":1728,"y":768,"exts":{},"type":"Water"},{"x":1792,"y":768,"exts":{},"type":"Water"},{"x":1856,"y":768,"exts":{},"type":"Water"},{"x":1920,"y":768,"exts":{},"type":"Water"},{"x":1984,"y":768,"exts":{},"type":"Water"},{"x":1984,"y":704,"exts":{},"type":"Water"},{"x":1984,"y":704,"exts":{},"type":"Water"},{"x":1984,"y":640,"exts":{},"type":"Water"},{"x":1984,"y":576,"exts":{},"type":"Water"},{"x":1984,"y":512,"exts":{},"type":"Water"},{"x":1984,"y":448,"exts":{},"type":"Water"},{"x":1984,"y":384,"exts":{},"type":"Water"},{"x":1920,"y":384,"exts":{},"type":"Water"},{"x":1856,"y":384,"exts":{},"type":"Water"},{"x":1856,"y":384,"exts":{},"type":"Water"},{"x":1792,"y":384,"exts":{},"type":"Water"},{"x":1728,"y":384,"exts":{},"type":"Water"},{"x":1728,"y":320,"exts":{},"type":"Water"},{"x":1728,"y":256,"exts":{},"type":"Water"},{"x":1728,"y":192,"exts":{},"type":"Water"},{"x":1728,"y":128,"exts":{},"type":"Water"},{"x":1792,"y":128,"exts":{},"type":"Water"},{"x":1792,"y":192,"exts":{},"type":"Water"},{"x":1792,"y":256,"exts":{},"type":"Water"},{"x":1856,"y":320,"exts":{},"type":"Water"},{"x":1792,"y":320,"exts":{},"type":"Water"},{"x":1920,"y":320,"exts":{},"type":"Water"},{"x":1984,"y":320,"exts":{},"type":"Water"},{"x":1984,"y":256,"exts":{},"type":"Water"},{"x":1920,"y":256,"exts":{},"type":"Water"},{"x":1856,"y":256,"exts":{},"type":"Water"},{"x":1856,"y":192,"exts":{},"type":"Water"},{"x":1920,"y":192,"exts":{},"type":"Water"},{"x":1984,"y":192,"exts":{},"type":"Water"},{"x":1984,"y":128,"exts":{},"type":"Water"},{"x":1920,"y":128,"exts":{},"type":"Water"},{"x":1856,"y":128,"exts":{},"type":"Water"},{"x":576,"y":64,"exts":{},"type":"WaterTop"},{"x":640,"y":64,"exts":{},"type":"WaterTop"},{"x":704,"y":64,"exts":{},"type":"WaterTop"},{"x":768,"y":64,"exts":{},"type":"WaterTop"},{"x":832,"y":64,"exts":{},"type":"WaterTop"},{"x":896,"y":64,"exts":{},"type":"WaterTop"},{"x":960,"y":64,"exts":{},"type":"WaterTop"},{"x":1024,"y":64,"exts":{},"type":"WaterTop"},{"x":1088,"y":64,"exts":{},"type":"WaterTop"},{"x":1152,"y":64,"exts":{},"type":"WaterTop"},{"x":1216,"y":64,"exts":{},"type":"WaterTop"},{"x":1280,"y":64,"exts":{},"type":"WaterTop"},{"x":1344,"y":64,"exts":{},"type":"WaterTop"},{"x":1408,"y":64,"exts":{},"type":"WaterTop"},{"x":1472,"y":64,"exts":{},"type":"WaterTop"},{"x":1536,"y":64,"exts":{},"type":"WaterTop"},{"x":1600,"y":64,"exts":{},"type":"WaterTop"},{"x":1728,"y":64,"exts":{},"type":"WaterTop"},{"x":1664,"y":64,"exts":{},"type":"WaterTop"},{"x":1792,"y":64,"exts":{},"type":"WaterTop"},{"x":1856,"y":64,"exts":{},"type":"WaterTop"},{"x":1920,"y":64,"exts":{},"type":"WaterTop"},{"x":1984,"y":64,"exts":{},"type":"WaterTop"},{"x":1536,"y":768,"exts":{},"type":"lod"},{"x":1600,"y":768,"exts":{},"type":"lod"},{"x":1664,"y":768,"exts":{},"type":"lod"},{"x":0,"y":832,"exts":{},"type":"Water"},{"x":64,"y":832,"exts":{},"type":"Water"},{"x":128,"y":832,"exts":{},"type":"Water"},{"x":192,"y":832,"exts":{},"type":"Water"},{"x":256,"y":832,"exts":{},"type":"Water"},{"x":384,"y":832,"exts":{},"type":"Water"},{"x":320,"y":832,"exts":{},"type":"Water"},{"x":448,"y":832,"exts":{},"type":"Water"},{"x":512,"y":832,"exts":{},"type":"Water"},{"x":576,"y":832,"exts":{},"type":"Water"},{"x":640,"y":832,"exts":{},"type":"Water"},{"x":704,"y":832,"exts":{},"type":"Water"},{"x":768,"y":832,"exts":{},"type":"Water"},{"x":832,"y":832,"exts":{},"type":"Water"},{"x":896,"y":832,"exts":{},"type":"Water"},{"x":960,"y":832,"exts":{},"type":"Water"},{"x":1088,"y":832,"exts":{},"type":"Water"},{"x":1024,"y":832,"exts":{},"type":"Water"},{"x":1152,"y":832,"exts":{},"type":"Water"},{"x":1216,"y":832,"exts":{},"type":"Water"},{"x":1280,"y":832,"exts":{},"type":"Water"},{"x":1344,"y":832,"exts":{},"type":"Water"},{"x":1408,"y":832,"exts":{},"type":"Water"},{"x":1472,"y":832,"exts":{},"type":"Water"},{"x":1536,"y":832,"exts":{},"type":"Water"},{"x":1600,"y":832,"exts":{},"type":"Water"},{"x":1664,"y":832,"exts":{},"type":"Water"},{"x":1728,"y":832,"exts":{},"type":"Water"},{"x":1792,"y":832,"exts":{},"type":"Water"},{"x":1856,"y":832,"exts":{},"type":"Water"},{"x":1920,"y":832,"exts":{},"type":"Water"},{"x":1984,"y":832,"exts":{},"type":"Water"},{"x":192,"y":448,"exts":{},"type":"robot"},{"x":512,"y":704,"exts":{},"type":"lod"},{"x":512,"y":256,"exts":{},"type":"lod"},{"x":576,"y":256,"exts":{},"type":"lod"},{"x":640,"y":256,"exts":{},"type":"lod"},{"x":704,"y":448,"exts":{},"type":"lod"},{"x":704,"y":384,"exts":{},"type":"lod"},{"x":704,"y":320,"exts":{},"type":"lod"},{"x":704,"y":256,"exts":{},"type":"lod"},{"x":768,"y":384,"exts":{},"type":"Water"},{"x":320,"y":384,"exts":{},"type":"GreenCrystal"},{"x":384,"y":384,"exts":{},"type":"GreenCrystal"},{"x":448,"y":384,"exts":{},"type":"GreenCrystal"},{"x":512,"y":384,"exts":{},"type":"GreenCrystal"},{"x":576,"y":384,"exts":{},"type":"GreenCrystal"},{"x":640,"y":384,"exts":{},"type":"GreenCrystal"},{"x":640,"y":448,"exts":{},"type":"GreenCrystal"},{"x":640,"y":512,"exts":{},"type":"GreenCrystal"},{"x":640,"y":576,"exts":{},"type":"GreenCrystal"},{"x":640,"y":640,"exts":{},"type":"GreenCrystal"},{"x":704,"y":640,"exts":{},"type":"GreenCrystal"},{"x":768,"y":640,"exts":{},"type":"GreenCrystal"},{"x":832,"y":640,"exts":{},"type":"GreenCrystal"},{"x":896,"y":576,"exts":{},"type":"GreenCrystal"},{"x":960,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1024,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1088,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1152,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1216,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1280,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1344,"y":576,"exts":{},"type":"GreenCrystal"},{"x":1472,"y":640,"exts":{},"type":"GreenCrystal"},{"x":1536,"y":640,"exts":{},"type":"GreenCrystal"},{"x":1600,"y":640,"exts":{},"type":"GreenCrystal"},{"x":1664,"y":640,"exts":{},"type":"GreenCrystal"},{"x":1728,"y":640,"exts":{},"type":"GreenCrystal"},{"x":1792,"y":640,"exts":{},"type":"GreenCrystal"},{"x":1408,"y":640,"exts":{},"type":"GreenCrystal"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom11';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom11'] = {
+    name: 'poziom11',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":-64,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":0,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":64,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":192,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":256,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":128,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":384,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":320,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":448,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":512,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":640,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":640,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":704,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":768,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":640,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":576,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-64,"y":576,"exts":{},"type":"Water_grow"},{"x":0,"y":576,"exts":{},"type":"Water_grow"},{"x":128,"y":576,"exts":{},"type":"Water_grow"},{"x":128,"y":576,"exts":{},"type":"Water_grow"},{"x":256,"y":576,"exts":{},"type":"Water_grow"},{"x":128,"y":576,"exts":{},"type":"Water_grow"},{"x":192,"y":576,"exts":{},"type":"Water_grow"},{"x":128,"y":576,"exts":{},"type":"Water_grow"},{"x":64,"y":576,"exts":{},"type":"Water_grow"},{"x":320,"y":576,"exts":{},"type":"Water_grow"},{"x":384,"y":576,"exts":{},"type":"Water_grow"},{"x":448,"y":576,"exts":{},"type":"Water_grow"},{"x":576,"y":576,"exts":{},"type":"Water_grow"},{"x":576,"y":576,"exts":{},"type":"Water_grow"},{"x":704,"y":576,"exts":{},"type":"Water_grow"},{"x":768,"y":576,"exts":{},"type":"Water_grow"},{"x":640,"y":576,"exts":{},"type":"Water_grow"},{"x":512,"y":576,"exts":{},"type":"Water_grow"},{"x":-64,"y":640,"exts":{},"type":"Water_grow"},{"x":64,"y":640,"exts":{},"type":"Water_grow"},{"x":0,"y":640,"exts":{},"type":"Water_grow"},{"x":128,"y":640,"exts":{},"type":"Water_grow"},{"x":256,"y":640,"exts":{},"type":"Water_grow"},{"x":192,"y":640,"exts":{},"type":"Water_grow"},{"x":320,"y":704,"exts":{},"type":"Water_grow"},{"x":384,"y":704,"exts":{},"type":"Water_grow"},{"x":384,"y":640,"exts":{},"type":"Water_grow"},{"x":320,"y":640,"exts":{},"type":"Water_grow"},{"x":448,"y":640,"exts":{},"type":"Water_grow"},{"x":512,"y":640,"exts":{},"type":"Water_grow"},{"x":576,"y":640,"exts":{},"type":"Water_grow"},{"x":640,"y":640,"exts":{},"type":"Water_grow"},{"x":704,"y":640,"exts":{},"type":"Water_grow"},{"x":768,"y":640,"exts":{},"type":"Water_grow"},{"x":768,"y":704,"exts":{},"type":"Water_grow"},{"x":768,"y":704,"exts":{},"type":"Water_grow"},{"x":704,"y":704,"exts":{},"type":"Water_grow"},{"x":640,"y":704,"exts":{},"type":"Water_grow"},{"x":576,"y":704,"exts":{},"type":"Water_grow"},{"x":512,"y":704,"exts":{},"type":"Water_grow"},{"x":448,"y":704,"exts":{},"type":"Water_grow"},{"x":256,"y":768,"exts":{},"type":"Water_grow"},{"x":256,"y":704,"exts":{},"type":"Water_grow"},{"x":192,"y":704,"exts":{},"type":"Water_grow"},{"x":128,"y":704,"exts":{},"type":"Water_grow"},{"x":64,"y":704,"exts":{},"type":"Water_grow"},{"x":0,"y":704,"exts":{},"type":"Water_grow"},{"x":-64,"y":704,"exts":{},"type":"Water_grow"},{"x":-64,"y":768,"exts":{},"type":"Water_grow"},{"x":64,"y":768,"exts":{},"type":"Water_grow"},{"x":64,"y":768,"exts":{},"type":"Water_grow"},{"x":0,"y":768,"exts":{},"type":"Water_grow"},{"x":128,"y":768,"exts":{},"type":"Water_grow"},{"x":192,"y":768,"exts":{},"type":"Water_grow"},{"x":384,"y":768,"exts":{},"type":"Water_grow"},{"x":384,"y":768,"exts":{},"type":"Water_grow"},{"x":320,"y":768,"exts":{},"type":"Water_grow"},{"x":448,"y":768,"exts":{},"type":"Water_grow"},{"x":512,"y":768,"exts":{},"type":"Water_grow"},{"x":576,"y":768,"exts":{},"type":"Water_grow"},{"x":640,"y":768,"exts":{},"type":"Water_grow"},{"x":704,"y":768,"exts":{},"type":"Water_grow"},{"x":768,"y":768,"exts":{},"type":"Water_grow"},{"x":320,"y":256,"exts":{},"type":"snieg-platforma"},{"x":384,"y":192,"exts":{},"type":"snieg-platforma"},{"x":448,"y":192,"exts":{},"type":"snieg-platforma"},{"x":512,"y":192,"exts":{},"type":"snieg-platforma"},{"x":576,"y":128,"exts":{},"type":"snieg-platforma"},{"x":640,"y":64,"exts":{},"type":"snieg-platforma"},{"x":704,"y":0,"exts":{},"type":"snieg-platforma"},{"x":576,"y":-64,"exts":{},"type":"snieg-platforma"},{"x":384,"y":-64,"exts":{},"type":"snieg-platforma"},{"x":192,"y":-256,"exts":{},"type":"snieg-platforma"},{"x":128,"y":-256,"exts":{},"type":"snieg-platforma"},{"x":64,"y":-256,"exts":{},"type":"snieg-platforma"},{"x":0,"y":-256,"exts":{},"type":"snieg-platforma"},{"x":-64,"y":-320,"exts":{},"type":"snieg-platforma"},{"x":-128,"y":-384,"exts":{},"type":"snieg-platforma"},{"x":-192,"y":-448,"exts":{},"type":"snieg-platforma"},{"x":-256,"y":-512,"exts":{},"type":"snieg-platforma"},{"x":-320,"y":-576,"exts":{},"type":"snieg-platforma"},{"x":-384,"y":-640,"exts":{},"type":"snieg-platforma"},{"x":-448,"y":-704,"exts":{},"type":"snieg-platforma"},{"x":-512,"y":-768,"exts":{},"type":"snieg-platforma"},{"x":-576,"y":-832,"exts":{},"type":"snieg-platforma"},{"x":-640,"y":-832,"exts":{},"type":"snieg-platforma"},{"x":-640,"y":-832,"exts":{},"type":"snieg-platforma"},{"x":-704,"y":-832,"exts":{},"type":"snieg-platforma"},{"x":-768,"y":-832,"exts":{},"type":"snieg-platforma"},{"x":-832,"y":-832,"exts":{},"type":"snieg-platforma"},{"x":128,"y":-320,"exts":{},"type":"Checkpoint"},{"x":256,"y":-192,"exts":{},"type":"snieg-platforma"},{"x":320,"y":-128,"exts":{},"type":"snieg-platforma"},{"x":832,"y":768,"exts":{},"type":"lod"},{"x":832,"y":704,"exts":{},"type":"lod"},{"x":832,"y":640,"exts":{},"type":"lod"},{"x":832,"y":576,"exts":{},"type":"lod"},{"x":832,"y":512,"exts":{},"type":"lod"},{"x":832,"y":448,"exts":{},"type":"lod"},{"x":832,"y":384,"exts":{},"type":"lod"},{"x":832,"y":320,"exts":{},"type":"lod"},{"x":832,"y":256,"exts":{},"type":"lod"},{"x":832,"y":128,"exts":{},"type":"lod"},{"x":832,"y":192,"exts":{},"type":"lod"},{"x":832,"y":64,"exts":{},"type":"lod"},{"x":832,"y":0,"exts":{},"type":"lod"},{"x":832,"y":-64,"exts":{},"type":"lod"},{"x":832,"y":-192,"exts":{},"type":"lod"},{"x":832,"y":-128,"exts":{},"type":"lod"},{"x":832,"y":-256,"exts":{},"type":"lod"},{"x":832,"y":-320,"exts":{},"type":"lod"},{"x":832,"y":-384,"exts":{},"type":"snieg"},{"x":-832,"y":-896,"exts":{},"type":"LevelExit"},{"x":-896,"y":-832,"exts":{},"type":"lod"},{"x":-896,"y":-896,"exts":{},"type":"lod"},{"x":-896,"y":-960,"exts":{},"type":"lod"},{"x":-896,"y":-1024,"exts":{},"type":"snieg"},{"x":-896,"y":-768,"exts":{},"type":"lod"},{"x":-896,"y":-704,"exts":{},"type":"lod"},{"x":-896,"y":-640,"exts":{},"type":"lod"},{"x":-896,"y":-576,"exts":{},"type":"lod"},{"x":-896,"y":-512,"exts":{},"type":"lod"},{"x":-896,"y":-448,"exts":{},"type":"lod"},{"x":-896,"y":-320,"exts":{},"type":"lod"},{"x":-896,"y":-384,"exts":{},"type":"lod"},{"x":-896,"y":-192,"exts":{},"type":"lod"},{"x":-896,"y":-256,"exts":{},"type":"lod"},{"x":-896,"y":-128,"exts":{},"type":"lod"},{"x":-896,"y":-64,"exts":{},"type":"lod"},{"x":-896,"y":0,"exts":{},"type":"lod"},{"x":-896,"y":64,"exts":{},"type":"lod"},{"x":-896,"y":128,"exts":{},"type":"lod"},{"x":-896,"y":192,"exts":{},"type":"lod"},{"x":-896,"y":256,"exts":{},"type":"lod"},{"x":-896,"y":320,"exts":{},"type":"lod"},{"x":-896,"y":384,"exts":{},"type":"lod"},{"x":-896,"y":448,"exts":{},"type":"lod"},{"x":-896,"y":512,"exts":{},"type":"lod"},{"x":-896,"y":576,"exts":{},"type":"lod"},{"x":-896,"y":640,"exts":{},"type":"lod"},{"x":-896,"y":704,"exts":{},"type":"lod"},{"x":-896,"y":768,"exts":{},"type":"lod"},{"x":-128,"y":768,"exts":{},"type":"Water_grow"},{"x":-128,"y":768,"exts":{},"type":"Water_grow"},{"x":-192,"y":768,"exts":{},"type":"Water_grow"},{"x":-256,"y":768,"exts":{},"type":"Water_grow"},{"x":-320,"y":768,"exts":{},"type":"Water_grow"},{"x":-384,"y":768,"exts":{},"type":"Water_grow"},{"x":-448,"y":768,"exts":{},"type":"Water_grow"},{"x":-512,"y":768,"exts":{},"type":"Water_grow"},{"x":-576,"y":768,"exts":{},"type":"Water_grow"},{"x":-576,"y":768,"exts":{},"type":"Water_grow"},{"x":-640,"y":768,"exts":{},"type":"Water_grow"},{"x":-704,"y":768,"exts":{},"type":"Water_grow"},{"x":-768,"y":768,"exts":{},"type":"Water_grow"},{"x":-832,"y":768,"exts":{},"type":"Water_grow"},{"x":-832,"y":704,"exts":{},"type":"Water_grow"},{"x":-768,"y":704,"exts":{},"type":"Water_grow"},{"x":-704,"y":704,"exts":{},"type":"Water_grow"},{"x":-640,"y":704,"exts":{},"type":"Water_grow"},{"x":-576,"y":704,"exts":{},"type":"Water_grow"},{"x":-512,"y":704,"exts":{},"type":"Water_grow"},{"x":-448,"y":704,"exts":{},"type":"Water_grow"},{"x":-384,"y":704,"exts":{},"type":"Water_grow"},{"x":-320,"y":704,"exts":{},"type":"Water_grow"},{"x":-320,"y":704,"exts":{},"type":"Water_grow"},{"x":-256,"y":704,"exts":{},"type":"Water_grow"},{"x":-192,"y":704,"exts":{},"type":"Water_grow"},{"x":-128,"y":704,"exts":{},"type":"Water_grow"},{"x":-128,"y":640,"exts":{},"type":"Water_grow"},{"x":-192,"y":640,"exts":{},"type":"Water_grow"},{"x":-256,"y":640,"exts":{},"type":"Water_grow"},{"x":-320,"y":640,"exts":{},"type":"Water_grow"},{"x":-384,"y":640,"exts":{},"type":"Water_grow"},{"x":-448,"y":640,"exts":{},"type":"Water_grow"},{"x":-512,"y":640,"exts":{},"type":"Water_grow"},{"x":-576,"y":640,"exts":{},"type":"Water_grow"},{"x":-640,"y":640,"exts":{},"type":"Water_grow"},{"x":-704,"y":640,"exts":{},"type":"Water_grow"},{"x":-768,"y":640,"exts":{},"type":"Water_grow"},{"x":-832,"y":640,"exts":{},"type":"Water_grow"},{"x":-832,"y":576,"exts":{},"type":"Water_grow"},{"x":-768,"y":576,"exts":{},"type":"Water_grow"},{"x":-768,"y":576,"exts":{},"type":"Water_grow"},{"x":-704,"y":576,"exts":{},"type":"Water_grow"},{"x":-640,"y":576,"exts":{},"type":"Water_grow"},{"x":-576,"y":576,"exts":{},"type":"Water_grow"},{"x":-512,"y":576,"exts":{},"type":"Water_grow"},{"x":-448,"y":576,"exts":{},"type":"Water_grow"},{"x":-384,"y":576,"exts":{},"type":"Water_grow"},{"x":-320,"y":576,"exts":{},"type":"Water_grow"},{"x":-256,"y":576,"exts":{},"type":"Water_grow"},{"x":-192,"y":576,"exts":{},"type":"Water_grow"},{"x":-128,"y":576,"exts":{},"type":"Water_grow"},{"x":-768,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-832,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-704,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-640,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-576,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-512,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-384,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-448,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-320,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-256,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-192,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":-128,"y":512,"exts":{},"type":"Water_Top_grow"},{"x":256,"y":256,"exts":{},"type":"snieg-platforma"},{"x":320,"y":256,"exts":{},"type":"robot"},{"x":448,"y":-64,"exts":{},"type":"snieg-platforma"},{"x":512,"y":-64,"exts":{},"type":"snieg-platforma"},{"x":-704,"y":-896,"exts":{},"type":"GreenCrystal"},{"x":-640,"y":-896,"exts":{},"type":"GreenCrystal"},{"x":-576,"y":-896,"exts":{},"type":"GreenCrystal"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        this.waterLevel = (this.waterLevel || 0.0) - 1.0 * ct.delta;
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom12';
+this.waterLevel = 0.0
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom12'] = {
+    name: 'poziom12',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":0,"y":384,"exts":{},"type":"lod"},{"x":0,"y":320,"exts":{},"type":"lod"},{"x":0,"y":256,"exts":{},"type":"lod"},{"x":0,"y":192,"exts":{},"type":"lod"},{"x":0,"y":448,"exts":{},"type":"lod"},{"x":0,"y":512,"exts":{},"type":"lod"},{"x":768,"y":512,"exts":{},"type":"lod"},{"x":768,"y":448,"exts":{},"type":"lod"},{"x":768,"y":448,"exts":{},"type":"lod"},{"x":768,"y":384,"exts":{},"type":"lod"},{"x":768,"y":576,"exts":{},"type":"lod"},{"x":0,"y":576,"exts":{},"type":"lod"},{"x":0,"y":0,"exts":{},"type":"snieg"},{"x":0,"y":128,"exts":{},"type":"lod"},{"x":0,"y":128,"exts":{},"type":"lod"},{"x":0,"y":64,"exts":{},"type":"lod"},{"x":64,"y":576,"exts":{},"type":"snieg"},{"x":128,"y":576,"exts":{},"type":"snieg"},{"x":192,"y":576,"exts":{},"type":"snieg"},{"x":256,"y":576,"exts":{},"type":"snieg"},{"x":320,"y":576,"exts":{},"type":"snieg"},{"x":384,"y":576,"exts":{},"type":"snieg"},{"x":448,"y":576,"exts":{},"type":"snieg"},{"x":512,"y":576,"exts":{},"type":"snieg"},{"x":576,"y":576,"exts":{},"type":"snieg"},{"x":640,"y":576,"exts":{},"type":"snieg"},{"x":64,"y":512,"exts":{},"type":"kolc"},{"x":128,"y":512,"exts":{},"type":"kolc"},{"x":192,"y":512,"exts":{},"type":"kolc"},{"x":256,"y":512,"exts":{},"type":"kolc"},{"x":320,"y":512,"exts":{},"type":"kolc"},{"x":384,"y":512,"exts":{},"type":"kolc"},{"x":448,"y":512,"exts":{},"type":"kolc"},{"x":512,"y":512,"exts":{},"type":"kolc"},{"x":576,"y":512,"exts":{},"type":"kolc"},{"x":640,"y":512,"exts":{},"type":"kolc"},{"x":704,"y":512,"exts":{},"type":"kolc"},{"x":704,"y":576,"exts":{},"type":"snieg"},{"x":64,"y":384,"exts":{},"type":"snieg-platforma"},{"x":192,"y":384,"exts":{},"type":"snieg-platforma"},{"x":320,"y":384,"exts":{},"type":"snieg-platforma"},{"x":448,"y":384,"exts":{},"type":"snieg-platforma"},{"x":576,"y":384,"exts":{},"type":"snieg-platforma"},{"x":704,"y":384,"exts":{},"type":"snieg-platforma"},{"x":-64,"y":64,"exts":{},"type":"snieg"},{"x":-128,"y":128,"exts":{},"type":"snieg"},{"x":-192,"y":192,"exts":{},"type":"snieg"},{"x":-256,"y":192,"exts":{},"type":"snieg"},{"x":-320,"y":192,"exts":{},"type":"snieg"},{"x":-384,"y":192,"exts":{},"type":"snieg"},{"x":-448,"y":-64,"exts":{},"type":"snieg"},{"x":-448,"y":0,"exts":{},"type":"lod"},{"x":-448,"y":64,"exts":{},"type":"lod"},{"x":-448,"y":128,"exts":{},"type":"lod"},{"x":-448,"y":192,"exts":{},"type":"lod"},{"x":768,"y":320,"exts":{},"type":"snieg"},{"x":-64,"y":128,"exts":{},"type":"lod"},{"x":-64,"y":192,"exts":{},"type":"lod"},{"x":-128,"y":192,"exts":{},"type":"lod"},{"x":832,"y":320,"exts":{},"type":"snieg"},{"x":896,"y":320,"exts":{},"type":"snieg"},{"x":960,"y":320,"exts":{},"type":"snieg"},{"x":1088,"y":256,"exts":{},"type":"snieg"},{"x":1152,"y":128,"exts":{},"type":"snieg"},{"x":1152,"y":192,"exts":{},"type":"lod"},{"x":1152,"y":256,"exts":{},"type":"lod"},{"x":1088,"y":320,"exts":{},"type":"lod"},{"x":1152,"y":320,"exts":{},"type":"lod"},{"x":1088,"y":192,"exts":{},"type":"LevelExit"},{"x":1024,"y":320,"exts":{},"type":"snieg"},{"x":1058,"y":291,"exts":{},"type":"GreenCrystal"},{"x":1024,"y":256,"exts":{},"type":"skrzynia_lod"},{"x":-320,"y":192,"exts":{},"type":"robot"},{"x":298,"y":292,"exts":{},"type":"Boss2"}]'),
+    bgs: JSON.parse('[]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.nextRoom = 'poziom13';
+inGameRoomStart(this);
+for(var a of ct.types.list.LevelExit){
+    a.visible = false;
+}
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom13old'] = {
+    name: 'poziom13old',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":192,"y":448,"exts":{},"type":"robot"},{"x":64,"y":128,"exts":{},"type":"skała"},{"x":128,"y":128,"exts":{},"type":"skała"},{"x":192,"y":192,"exts":{},"type":"skała"},{"x":256,"y":128,"exts":{},"type":"skała"},{"x":320,"y":64,"exts":{},"type":"skała"},{"x":384,"y":64,"exts":{},"type":"skała"},{"x":448,"y":64,"exts":{},"type":"skała"},{"x":512,"y":0,"exts":{},"type":"skała"},{"x":640,"y":0,"exts":{},"type":"skała"},{"x":576,"y":0,"exts":{},"type":"skała"},{"x":640,"y":-64,"exts":{},"type":"skała"},{"x":640,"y":-128,"exts":{},"type":"skała"},{"x":704,"y":-128,"exts":{},"type":"skała"},{"x":832,"y":-128,"exts":{},"type":"skała"},{"x":768,"y":-128,"exts":{},"type":"skała"},{"x":896,"y":-128,"exts":{},"type":"skała"},{"x":960,"y":-64,"exts":{},"type":"skała"},{"x":960,"y":0,"exts":{},"type":"skała"},{"x":960,"y":64,"exts":{},"type":"skała"},{"x":960,"y":128,"exts":{},"type":"skała"},{"x":1024,"y":256,"exts":{},"type":"skała"},{"x":960,"y":192,"exts":{},"type":"skała"},{"x":960,"y":320,"exts":{},"type":"skała"},{"x":1024,"y":320,"exts":{},"type":"skała"},{"x":1024,"y":384,"exts":{},"type":"skała"},{"x":1024,"y":448,"exts":{},"type":"skała"},{"x":960,"y":512,"exts":{},"type":"skała"},{"x":896,"y":576,"exts":{},"type":"skała"},{"x":832,"y":576,"exts":{},"type":"skała"},{"x":768,"y":576,"exts":{},"type":"skała"},{"x":704,"y":576,"exts":{},"type":"skała"},{"x":640,"y":576,"exts":{},"type":"skała"},{"x":576,"y":576,"exts":{},"type":"skała"},{"x":512,"y":576,"exts":{},"type":"skała"},{"x":448,"y":576,"exts":{},"type":"skała"},{"x":384,"y":640,"exts":{},"type":"skała"},{"x":320,"y":640,"exts":{},"type":"skała"},{"x":320,"y":704,"exts":{},"type":"skała"},{"x":320,"y":768,"exts":{},"type":"skała"},{"x":320,"y":896,"exts":{},"type":"skała"},{"x":320,"y":832,"exts":{},"type":"skała"},{"x":320,"y":960,"exts":{},"type":"skała"},{"x":320,"y":1024,"exts":{},"type":"skała"},{"x":256,"y":1024,"exts":{},"type":"skała"},{"x":192,"y":1024,"exts":{},"type":"skała"},{"x":128,"y":1024,"exts":{},"type":"skała"},{"x":64,"y":1024,"exts":{},"type":"skała"},{"x":0,"y":1024,"exts":{},"type":"skała"},{"x":-64,"y":960,"exts":{},"type":"skała"},{"x":-128,"y":896,"exts":{},"type":"skała"},{"x":-192,"y":832,"exts":{},"type":"skała"},{"x":-256,"y":768,"exts":{},"type":"skała"},{"x":-256,"y":704,"exts":{},"type":"skała"},{"x":-256,"y":640,"exts":{},"type":"skała"},{"x":-320,"y":576,"exts":{},"type":"skała"},{"x":-384,"y":576,"exts":{},"type":"skała"},{"x":-448,"y":576,"exts":{},"type":"skała"},{"x":-512,"y":576,"exts":{},"type":"skała"},{"x":-512,"y":576,"exts":{},"type":"skała"},{"x":-512,"y":512,"exts":{},"type":"skała"},{"x":-512,"y":448,"exts":{},"type":"skała"},{"x":-512,"y":384,"exts":{},"type":"skała"},{"x":-512,"y":320,"exts":{},"type":"skała"},{"x":-512,"y":256,"exts":{},"type":"skała"},{"x":-384,"y":256,"exts":{},"type":"skała"},{"x":-448,"y":256,"exts":{},"type":"skała"},{"x":-320,"y":256,"exts":{},"type":"skała"},{"x":-256,"y":256,"exts":{},"type":"skała"},{"x":-192,"y":192,"exts":{},"type":"skała"},{"x":-128,"y":128,"exts":{},"type":"skała"},{"x":0,"y":128,"exts":{},"type":"skała"},{"x":0,"y":128,"exts":{},"type":"skała"},{"x":-64,"y":128,"exts":{},"type":"skała"},{"x":-384,"y":448,"exts":{},"type":"GreenCrystal"},{"x":-320,"y":448,"exts":{},"type":"GreenCrystal"},{"x":-320,"y":512,"exts":{},"type":"GreenCrystal"},{"x":-384,"y":512,"exts":{},"type":"GreenCrystal"},{"x":64,"y":960,"exts":{},"type":"Heart"},{"x":0,"y":896,"exts":{},"type":"Heart"},{"x":64,"y":896,"exts":{},"type":"Heart"},{"x":667,"y":355,"exts":{},"type":"GreenCrystal"},{"x":419,"y":359,"exts":{},"type":"GreenCrystal"},{"x":384,"y":320,"exts":{},"type":"skrzynia"},{"x":640,"y":320,"exts":{},"type":"skrzynia"},{"x":796,"y":-37,"exts":{},"type":"LevelExit"},{"x":-64,"y":640,"exts":{},"type":"pratforma"},{"x":64,"y":640,"exts":{},"type":"pratforma"},{"x":0,"y":640,"exts":{},"type":"pratforma"},{"x":128,"y":640,"exts":{},"type":"pratforma"}]'),
+    bgs: JSON.parse('[{"depth":-1,"texture":"pixil-frame-0_(19)","extends":{"parallaxX":0.9,"parallaxY":0.9}}]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.waterLevel = true;
+this.nextRoom = 'poziom1';
+inGameRoomStart(this);
+    },
+    extends: {}
+}
+ct.rooms.templates['poziom13'] = {
+    name: 'poziom13',
+    width: 800,
+    height: 600,
+    /* JSON.parse allows for a much faster loading of big objects */
+    objects: JSON.parse('[{"x":128,"y":320,"exts":{},"type":"robot"},{"x":576,"y":256,"exts":{},"type":"LevelExit"}]'),
+    bgs: JSON.parse('[{"depth":-1,"texture":"pixil-frame-0_(19)","extends":{"parallaxX":0.5,"parallaxY":0.5}}]'),
+    tiles: JSON.parse('[{"depth":-10,"tiles":[],"extends":{}}]'),
+    backgroundColor: '#000000',
+    
+    onStep() {
+        
+    },
+    onDraw() {
+        
+    },
+    onLeave() {
+        
+    },
+    onCreate() {
+        this.waterLevel = true;
+this.nextRoom = 'poziom1';
+inGameRoomStart(this);
+
     },
     extends: {}
 }
@@ -3495,6 +3910,21 @@ ct.styles.new(
     "stroke": "#FFFFFF"
 });
 
+ct.styles.new(
+    "HeartCounter",
+    {
+    "fontFamily": "sans-serif",
+    "fontSize": 24,
+    "fontStyle": "normal",
+    "fontWeight": "600",
+    "align": "left",
+    "lineJoin": "round",
+    "lineHeight": 32.400000000000006,
+    "fill": "#E85017",
+    "strokeThickness": 5,
+    "stroke": "#FFFFFF"
+});
+
 
 
 (function resAddon(ct) {
@@ -3511,7 +3941,7 @@ ct.styles.new(
         soundsTotal: [0][0],
         soundsError: 0,
         sounds: {},
-        registry: [{"Checkpoint":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"BG":{"atlas":"./img/t0.png","frames":0,"shape":{"type":"rect","top":0,"bottom":256,"left":0,"right":256},"anchor":{"x":0,"y":0}},"GreenCrystal":{"frames":1,"shape":{"type":"circle","r":15},"anchor":{"x":0.5,"y":0.5}},"Robot_Idle":{"frames":1,"shape":{"type":"rect","top":65,"bottom":0,"left":24,"right":24},"anchor":{"x":0.5,"y":1}},"Robot_Walking":{"frames":2,"shape":{"type":"rect","top":65,"bottom":0,"left":24,"right":24},"anchor":{"x":0.5,"y":1}},"Exit":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Rocks":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Rocks_Top":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Water_Top":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Spikes":{"frames":1,"shape":{"type":"rect","top":-30,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Robot_Jump":{"frames":1,"shape":{"type":"rect","top":65,"bottom":0,"left":24,"right":24},"anchor":{"x":0.5,"y":1}},"Water":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Heart":{"frames":1,"shape":{"type":"circle","r":17},"anchor":{"x":0.5,"y":0.5}},"Platform":{"frames":1,"shape":{"type":"rect","top":0,"bottom":32,"left":0,"right":128},"anchor":{"x":0,"y":0}},"Rocks_Platform":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}}}][0],
+        registry: [{"Checkpoint":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"BG":{"atlas":"./img/t0.png","frames":0,"shape":{"type":"rect","top":0,"bottom":256,"left":0,"right":256},"anchor":{"x":0,"y":0}},"GreenCrystal":{"frames":1,"shape":{"type":"circle","r":15},"anchor":{"x":0.5,"y":0.5}},"Robot_Idle":{"frames":1,"shape":{"type":"rect","top":65,"bottom":0,"left":24,"right":24},"anchor":{"x":0.5,"y":1}},"Robot_Walking":{"frames":2,"shape":{"type":"rect","top":65,"bottom":0,"left":24,"right":24},"anchor":{"x":0.5,"y":1}},"Exit":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Rocks":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Rocks_Top":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Water_Top":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Spikes":{"frames":1,"shape":{"type":"rect","top":-30,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Robot_Jump":{"frames":1,"shape":{"type":"rect","top":65,"bottom":0,"left":24,"right":24},"anchor":{"x":0.5,"y":1}},"Water":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Heart":{"frames":1,"shape":{"type":"circle","r":17},"anchor":{"x":0.5,"y":0.5}},"Platform":{"frames":1,"shape":{"type":"rect","top":0,"bottom":32,"left":0,"right":128},"anchor":{"x":0,"y":0}},"Rocks_Platform":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"platforma_ukryta":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"lava2":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"lava2-top":{"frames":1,"shape":{"type":"rect","top":-9,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"kolce":{"frames":1,"shape":{"type":"rect","top":-30,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"lod":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"snieg":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"snieg-platforma":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"szklo":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"szklo2":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"zamek-platforma":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(7)":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(5)":{"frames":1,"shape":{"type":"rect","top":0,"bottom":40,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(1)":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":-2.720238095238095,"y":-0.36904761904761896}},"pixil-frame-0_(1)_2":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(17)":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(17)-kopia_2":{"frames":1,"shape":{"type":"rect","top":-30,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(9)":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(10)":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Water-grow":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"Water_Top_grow":{"frames":1,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"pixil-frame-0_(20)":{"atlas":"./img/t1.png","frames":0,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}},"SpringShort1_3":{"atlas":"./img/t2.png","frames":0,"shape":{"type":"rect","top":0,"bottom":582,"left":0,"right":1919},"anchor":{"x":0,"y":0}},"SpringShort1_4":{"atlas":"./img/t3.png","frames":0,"shape":{"type":"rect","top":0,"bottom":621,"left":0,"right":1924},"anchor":{"x":0,"y":0}},"SpringShort1_2":{"atlas":"./img/t4.png","frames":0,"shape":{"type":"rect","top":0,"bottom":723,"left":0,"right":1923},"anchor":{"x":0,"y":0}},"SpringShort1_5":{"atlas":"./img/t5.png","frames":0,"shape":{"type":"rect","top":0,"bottom":1081,"left":0,"right":1923},"anchor":{"x":0,"y":0}},"pixil-frame-0_(19)":{"atlas":"./img/t6.png","frames":0,"shape":{"type":"rect","top":0,"bottom":64,"left":0,"right":64},"anchor":{"x":0,"y":0}}}][0],
         atlases: [["./img/a0.json"]][0],
         skelRegistry: [{}][0],
         fetchImage(url, callback) {
@@ -3529,7 +3959,13 @@ ct.styles.new(
             // filled by IDE and catmods. As usual, atlases are splitted here.
             PIXI.Loader.shared
 .add('./img/a0.json')
-.add('./img/t0.png');
+.add('./img/t0.png')
+.add('./img/t1.png')
+.add('./img/t2.png')
+.add('./img/t3.png')
+.add('./img/t4.png')
+.add('./img/t5.png')
+.add('./img/t6.png');
 
 PIXI.Loader.shared
             
@@ -4025,31 +4461,56 @@ ct.types.templates["robot"] = {
     onStep: function () {
         this.movespeed = 4 * ct.delta; // Max horizontal speed
 
+if(!this.first_setup) {
+this.jumpSpeed = ct.room.waterLevel ? -3 : -10;
+this.gravity = ct.room.waterLevel ? 0.05 : 0.4;
+if (this.tex !== 'Robot_Walking' && ct.room.waterLevel) {
+    this.tex = 'Robot_Walking';
+    this.play();
+}
+if(ct.room.waterLevel) {
+        this.rotation = -90;
+    }
+}
+
+
+
 if (ct.actions.MoveLeft.down) {
     // If the A key or left arrow on a keyboard is down, then move to left
     this.hspeed = -this.movespeed;
-    if (this.tex !== 'Robot_Walking') {
+    if (this.tex !== 'Robot_Walking' && !ct.room.waterLevel) {
         this.tex = 'Robot_Walking';
         this.play();
     }
     this.scale.x = -1;
+    if(ct.room.waterLevel) {
+        this.rotation = 90;
+    }
 } else if (ct.actions.MoveRight.down) {
     // If the D key or right arrow on a keyboard is down, then move to right
     this.hspeed = this.movespeed;
     // Set the walking animation and transform the robot to the right
-    if (this.tex !== 'Robot_Walking') {
+    if (this.tex !== 'Robot_Walking' && !ct.room.waterLevel) {
         this.tex = 'Robot_Walking';
         this.play();
     }
+    
     this.scale.x = 1;
+    if(ct.room.waterLevel) {
+        this.rotation = -90;
+    }
 } else {
     // Don't move horizontally if no input
     this.hspeed = 0;
-    this.tex = 'Robot_Idle';
+    if(!ct.room.waterLevel) {
+        this.tex = 'Robot_Idle';
+    }
 }
 
+var skrzynia;
+
 // If there is ground underneath the Robot…
-if (ct.place.occupied(this, this.x, this.y + 1, 'Solid')) {
+if ((ct.room.waterLevel && ct.actions.Jump.down) || ct.place.occupied(this, this.x, this.y + 1, 'Solid')) {
     // …and the W key or the spacebar is down…
     if (ct.actions.Jump.down) {
         // …then jump!
@@ -4063,12 +4524,39 @@ if (ct.place.occupied(this, this.x, this.y + 1, 'Solid')) {
     this.vspeed += this.gravity * ct.delta;
 
     // Set jumping animation!
-    this.tex = 'Robot_Jump';
+    if(!ct.room.waterLevel) {
+        this.tex = 'Robot_Jump';
+    }
 }
+
+if(ct.room.waterLevel){
+  if (skrzynia = ct.place.occupied(this, this.x, this.y + 1, 'skrzynia')) {
+        skrzynia.kill = true
+    }
+if (skrzynia = ct.place.occupied(this, this.x, this.y - 1, 'skrzynia')) {
+        skrzynia.kill = true
+    }
+if (skrzynia = ct.place.occupied(this, this.x - 1, this.y , 'skrzynia')) {
+        skrzynia.kill = true
+    }
+    if (skrzynia = ct.place.occupied(this, this.x + 1, this.y , 'skrzynia')) {
+        skrzynia.kill = true
+    }
+} else {
+    if (skrzynia = ct.place.occupied(this, this.x, this.y + 1, 'skrzynia')) {
+        this.vspeed = this.jumpSpeed;
+        if(!ct.room.waterLevel) {
+            this.tex = 'Robot_Jump';
+        }
+        skrzynia.kill = true
+    }
+}
+
+
 
 // Move by horizontal axis, pixel by pixel
 for (var i = 0; i < Math.abs(this.hspeed); i++) {
-    if (ct.place.free(this, this.x + Math.sign(this.hspeed), this.y, 'Solid')) {
+    if (ct.place.free(this, this.x + Math.sign(this.hspeed), this.y, 'Solid') && ct.place.free(this, this.x + Math.sign(this.hspeed), this.y, 'skrzynia')) {
         this.x += Math.sign(this.hspeed);
     } else {
         break;
@@ -4076,7 +4564,7 @@ for (var i = 0; i < Math.abs(this.hspeed); i++) {
 }
 // Do the same for vertical speed
 for (var i = 0; i < Math.abs(this.vspeed); i++) {
-    if (ct.place.free(this, this.x, this.y + Math.sign(this.vspeed), 'Solid')) {
+    if (ct.place.free(this, this.x, this.y + Math.sign(this.vspeed), 'Solid') && ct.place.free(this, this.x, this.y + Math.sign(this.vspeed), 'skrzynia') ) {
         this.y += Math.sign(this.vspeed);
     } else {
         break;
@@ -4086,11 +4574,17 @@ for (var i = 0; i < Math.abs(this.vspeed); i++) {
 if (ct.place.occupied(this, this.x, this.y, 'Deadly')) {
     this.x = this.savedX;
     this.y = this.savedY;
+    ct.room.waterLevel = ct.room.savedWaterLevel || 0.0;
     this.hspeed = 0;
     this.vspeed = 0;
+    // remove one life
+    ct.room.lives --;
+    if (ct.room.lives <= 0) {
+        // Restart a room: switch to the room of its own name
+        ct.rooms.switch(ct.room.name);
+    }
     return;
 }
-
     },
     onDraw: function () {
         
@@ -4099,11 +4593,12 @@ if (ct.place.occupied(this, this.x, this.y, 'Deadly')) {
         
     },
     onCreate: function () {
-        this.jumpSpeed = -10;
-this.gravity = 0.4;
+        this.jumpSpeed = ct.room.waterLevel ? -3 : -10;
+this.gravity = ct.room.waterLevel ? 0.05 : 0.4;
 this.animationSpeed = 0.2;
 this.hspeed = 0; // Horizontal speed
 this.vspeed = 0; // Vertical speed
+this.first_setup = false;
 
 this.savedX = this.x;
 this.savedY = this.y;
@@ -4237,6 +4732,7 @@ ct.types.templates["Checkpoint"] = {
 if (robot) {
     robot.savedX = this.x + 32;
     robot.savedY = this.y + 32;
+    ct.room.savedWaterLevel = Math.min((ct.room.waterLevel || 0.0) + 128.0, 0.0);
 }
     },
     onDraw: function () {
@@ -4251,12 +4747,12 @@ if (robot) {
     extends: {}
 };
 ct.types.list['Checkpoint'] = [];
-ct.types.templates["Exit"] = {
+ct.types.templates["LevelExit"] = {
     depth: 0,
     texture: "Exit",
     onStep: function () {
         // Are there next rooms defined?
-if (ct.room.nextRoom) {
+if (ct.room.nextRoom && this.visible) {
     
     // Do we collide with the Robot?
     if (ct.place.meet(this, this.x, this.y, 'robot')) {
@@ -4276,7 +4772,7 @@ if (ct.room.nextRoom) {
     },
     extends: {}
 };
-ct.types.list['Exit'] = [];
+ct.types.list['LevelExit'] = [];
 ct.types.templates["GreenCrystal"] = {
     depth: 0,
     texture: "GreenCrystal",
@@ -4298,7 +4794,7 @@ ct.types.templates["GreenCrystal"] = {
     extends: {}
 };
 ct.types.list['GreenCrystal'] = [];
-ct.types.templates["CrystalsWidget"] = {
+ct.types.templates["liczbak"] = {
     depth: 0,
     texture: "GreenCrystal",
     onStep: function () {
@@ -4320,10 +4816,10 @@ this.addChild(this.text);
     },
     extends: {}
 };
-ct.types.list['CrystalsWidget'] = [];
+ct.types.list['liczbak'] = [];
 ct.types.templates["platforma_ukryta"] = {
     depth: 0,
-    texture: "Rocks_Platform",
+    texture: "platforma_ukryta",
     onStep: function () {
         this.move();
     },
@@ -4341,6 +4837,613 @@ ct.types.templates["platforma_ukryta"] = {
 }
 };
 ct.types.list['platforma_ukryta'] = [];
+ct.types.templates["Heart"] = {
+    depth: 0,
+    texture: "Heart",
+    onStep: function () {
+        if (ct.place.meet(this, this.x, this.y, 'robot')) {
+    if (ct.room.lives < 3) {
+        ct.room.lives++;
+        this.kill = true;
+    }
+}
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {}
+};
+ct.types.list['Heart'] = [];
+ct.types.templates["liczbazyc"] = {
+    depth: 2,
+    texture: "Heart",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        this.text.text = ct.room.lives;
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        this.text = new PIXI.Text(ct.room.lives, ct.styles.get('HeartCounter'));
+this.text.x = 32;
+this.text.anchor.y = 0.5;
+
+this.addChild(this.text);
+
+    },
+    extends: {}
+};
+ct.types.list['liczbazyc'] = [];
+ct.types.templates["Platform"] = {
+    depth: 0,
+    texture: "Platform",
+    onStep: function () {
+        var robot = ct.place.meet(this, this.x, this.y, 'robot');
+if (robot) {
+    this.ctype = undefined;
+} else {
+    this.ctype = 'Solid';
+    robot = ct.place.meet(this, this.x, this.y - 1, 'robot');
+    if (robot) {
+        robot.x += ct.u.ldx(this.speed, this.direction);
+    }
+}
+
+if (ct.place.occupied(this, this.x + this.speed * ct.delta, this.y, 'Solid')) {
+    // Flip direction
+    this.direction += 180;
+}
+this.move();
+
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        this.speed = 2;
+this.ctype = 'Solid';
+
+    },
+    extends: {
+    "ctype": ""
+}
+};
+ct.types.list['Platform'] = [];
+ct.types.templates["lava2"] = {
+    depth: 0,
+    texture: "lava2",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['lava2'] = [];
+ct.types.templates["lava2-top"] = {
+    depth: 0,
+    texture: "lava2-top",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['lava2-top'] = [];
+ct.types.templates["kolce"] = {
+    depth: 0,
+    texture: "kolce",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['kolce'] = [];
+ct.types.templates["lod"] = {
+    depth: 0,
+    texture: "lod",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['lod'] = [];
+ct.types.templates["snieg"] = {
+    depth: 0,
+    texture: "snieg",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['snieg'] = [];
+ct.types.templates["snieg-platforma"] = {
+    depth: 0,
+    texture: "snieg-platforma",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['snieg-platforma'] = [];
+ct.types.templates["szklo2"] = {
+    depth: 0,
+    texture: "szklo2",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['szklo2'] = [];
+ct.types.templates["dywan"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(7)",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['dywan'] = [];
+ct.types.templates["zamek-platforma"] = {
+    depth: 0,
+    texture: "zamek-platforma",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['zamek-platforma'] = [];
+ct.types.templates["plat"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(5)",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['plat'] = [];
+ct.types.templates["piach g"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(1)",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['piach g'] = [];
+ct.types.templates["piach d"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(1)_2",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['piach d'] = [];
+ct.types.templates["dwn"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(7)",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Solid"
+}
+};
+ct.types.list['dwn'] = [];
+ct.types.templates["Boss1"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(17)",
+    onStep: function () {
+        this.robot_copy = this.robot_copy || ct.types.list.robot[0];
+
+if(this.y+1 > this.robot_copy.y) {
+    this.ctype = "Solid";
+
+    if(this.robot_copy.vspeed > 0 && ct.place.meet(this, this.x, this.y - 5, 'robot')){
+        this.robot_copy.vspeed = -10;
+        this.lives--;
+        if(this.lives <= 0) {
+           this.kill = true;
+           for(var a of ct.types.list.LevelExit){
+               a.visible = true;
+           }
+        }
+    }
+} else if (this.y-2 < this.robot_copy.y) { 
+    this.ctype = "Deadly";
+}
+
+if (ct.place.occupied(this, this.x + this.speed * ct.delta, this.y, 'Solid')) {
+    // Flip direction
+    this.direction += 180;
+}
+
+
+this.move();
+
+    },
+    onDraw: function () {
+        this.text.text = this.lives;
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        this.lives = 5;
+this.speed = 2;
+
+this.text = new PIXI.Text(this.lives, ct.styles.get('HeartCounter'));
+this.text.x = 64;
+this.text.anchor.y = 0.5;
+
+this.addChild(this.text);
+
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['Boss1'] = [];
+ct.types.templates["NewType"] = {
+    depth: 0,
+    
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {}
+};
+ct.types.list['NewType'] = [];
+ct.types.templates["NewTyp"] = {
+    depth: 0,
+    
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {}
+};
+ct.types.list['NewTyp'] = [];
+ct.types.templates["kolc"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(17)-kopia_2",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['kolc'] = [];
+ct.types.templates["skrzynia"] = {
+    depth: 1,
+    texture: "pixil-frame-0_(9)",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "skrzynia"
+}
+};
+ct.types.list['skrzynia'] = [];
+ct.types.templates["skrzynia_lod"] = {
+    depth: 1,
+    texture: "pixil-frame-0_(10)",
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {
+    "ctype": "skrzynia"
+}
+};
+ct.types.list['skrzynia_lod'] = [];
+ct.types.templates["Water_Top_grow"] = {
+    depth: 1,
+    texture: "Water_Top_grow",
+    onStep: function () {
+        this.y = this.star_y + (ct.room.waterLevel || 0.0);
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        this.star_y = this.y;
+
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['Water_Top_grow'] = [];
+ct.types.templates["Water_grow"] = {
+    depth: 1,
+    texture: "Water-grow",
+    onStep: function () {
+        this.y = this.start_y + (ct.room.waterLevel || 0.0);
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        this.start_y = this.y;
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['Water_grow'] = [];
+ct.types.templates["New"] = {
+    depth: 0,
+    
+    onStep: function () {
+        this.move();
+    },
+    onDraw: function () {
+        
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        
+    },
+    extends: {}
+};
+ct.types.list['New'] = [];
+ct.types.templates["Boss2"] = {
+    depth: 0,
+    texture: "pixil-frame-0_(17)",
+    onStep: function () {
+        this.robot_copy = this.robot_copy || ct.types.list.robot[0];
+
+if(this.y+1 > this.robot_copy.y) {
+    this.ctype = "Solid";
+
+    if(this.robot_copy.vspeed > 0 && ct.place.meet(this, this.x, this.y - 5, 'robot')){
+        this.robot_copy.vspeed = -10;
+        this.lives--;
+        if(this.lives <= 0) {
+           this.kill = true;
+           for(var a of ct.types.list.LevelExit){
+               a.visible = true;
+           }
+        }
+    }
+} else if (this.y-2 < this.robot_copy.y) { 
+    this.ctype = "Deadly";
+}
+
+if (ct.place.occupied(this, this.x + this.speed * ct.delta, this.y, 'Solid')) {
+    // Flip direction
+    this.direction += 180;
+}
+
+
+this.move();
+
+    },
+    onDraw: function () {
+        this.text.text = this.lives;
+    },
+    onDestroy: function () {
+        
+    },
+    onCreate: function () {
+        this.lives = 5;
+this.speed = 3;
+
+this.text = new PIXI.Text(this.lives, ct.styles.get('HeartCounter'));
+this.text.x = 64;
+this.text.anchor.y = 0.5;
+
+this.addChild(this.text);
+
+    },
+    extends: {
+    "ctype": "Deadly"
+}
+};
+ct.types.list['Boss2'] = [];
     
 
     ct.types.beforeStep = function beforeStep() {
